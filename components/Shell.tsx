@@ -3,6 +3,20 @@ import { AppNav } from "@/components/AppNav";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { copy, type Lang } from "@/lib/lang";
 
+const zh = {
+  dashboard: "\u6570\u636e\u770b\u677f",
+  assistant: "AI \u52a9\u624b",
+  consult: "AI \u95ee\u8bca",
+  bodyTest: "\u8eab\u4f53\u68c0\u6d4b",
+  shop: "\u5546\u57ce",
+  rfq: "\u4f9b\u5e94\u94fe",
+  account: "\u8d26\u6237",
+  console: "\u4e34\u5e8a\u8fd0\u8425\u63a7\u5236\u53f0",
+  status: "\u7cfb\u7edf\u72b6\u6001\uff1a\u6b63\u5e38",
+  ops: "\u4e34\u5e8a AI \u8fd0\u8425",
+  search: "\u641c\u7d22\u60a3\u8005\u3001\u8ba2\u5355\u3001RFQ\u3001\u4ea7\u54c1..."
+};
+
 export function Shell({
   lang,
   children
@@ -11,13 +25,13 @@ export function Shell({
   children: React.ReactNode;
 }) {
   const navItems = [
-    { label: "数据看板", sublabel: "Dashboard", href: `/${lang}/dashboard` },
-    { label: "AI 助手", sublabel: "Assistant", href: `/${lang}/assistant` },
-    { label: "AI 问诊", sublabel: "Consult", href: `/${lang}/consult` },
-    { label: "身体检测", sublabel: "Body Test", href: `/${lang}/tcm-check` },
-    { label: "商城", sublabel: "Shop", href: `/${lang}/shop` },
-    { label: "供应链", sublabel: "RFQ", href: `/${lang}/rfq` },
-    { label: "账户", sublabel: "Account", href: `/${lang}/account` }
+    { label: zh.dashboard, sublabel: "Dashboard", href: `/${lang}/dashboard` },
+    { label: zh.assistant, sublabel: "Assistant", href: `/${lang}/assistant` },
+    { label: zh.consult, sublabel: "Consult", href: `/${lang}/consult` },
+    { label: zh.bodyTest, sublabel: "Body Test", href: `/${lang}/tcm-check` },
+    { label: zh.shop, sublabel: "Shop", href: `/${lang}/shop` },
+    { label: zh.rfq, sublabel: "RFQ", href: `/${lang}/rfq` },
+    { label: zh.account, sublabel: "Account", href: `/${lang}/account` }
   ];
 
   return (
@@ -45,9 +59,7 @@ export function Shell({
               <div className="rounded-md border border-white/10 bg-white/5 p-3">
                 <p className="font-semibold text-ink">GB Medix Hospital</p>
                 <p className="mt-1">
-                  {lang === "zh"
-                    ? "临床运营控制台"
-                    : "Clinical operations console"}
+                  {lang === "zh" ? zh.console : "Clinical operations console"}
                 </p>
               </div>
               <p>{copy[lang].disclaimer}</p>
@@ -68,16 +80,14 @@ export function Shell({
 
               <div className="hidden items-center gap-3 text-sm text-ink/65 lg:flex">
                 <span className="h-2 w-2 rounded-full bg-mint shadow-[0_0_16px_rgba(99,245,215,0.95)]" />
-                <span>
-                  {lang === "zh" ? "系统状态：正常" : "System status: Normal"}
-                </span>
+                <span>{lang === "zh" ? zh.status : "System status: Normal"}</span>
                 <span className="text-white/20">|</span>
-                <span>{lang === "zh" ? "临床 AI 运营" : "Clinical AI Ops"}</span>
+                <span>{lang === "zh" ? zh.ops : "Clinical AI Ops"}</span>
               </div>
 
               <div className="hidden min-w-[320px] rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm text-ink/55 md:block">
                 {lang === "zh"
-                  ? "搜索患者、订单、RFQ、产品..."
+                  ? zh.search
                   : "Search patients, orders, RFQs, products..."}
               </div>
 
