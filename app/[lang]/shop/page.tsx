@@ -1,5 +1,4 @@
 import { Shell } from "@/components/Shell";
-import { ensureDatabase } from "@/lib/db";
 import { getLang } from "@/lib/lang";
 import { prisma } from "@/lib/prisma";
 import { ShopExperience, type ShopProduct } from "./shop-experience";
@@ -69,7 +68,6 @@ function mapCategory(category: string): ShopProduct["category"] {
 
 export default async function ShopPage({ params }: { params: { lang: string } }) {
   const lang = getLang(params.lang);
-  await ensureDatabase();
 
   const merchantProducts = await prisma.product.findMany({
     where: { status: "active" },

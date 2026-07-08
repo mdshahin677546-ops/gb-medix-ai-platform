@@ -21,7 +21,7 @@ export function DoctorOrders() {
     const response = await fetch("/api/doctor/orders");
     const data = await response.json();
     if (!response.ok) {
-      setError("Please sign in as a doctor first.");
+      setError(data.error || "Please sign in as a doctor first.");
       return;
     }
     setDoctorName(data.doctor.name);

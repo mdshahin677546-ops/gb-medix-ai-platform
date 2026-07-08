@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { ensureDatabase } from "@/lib/db";
+import { grantEntitlementForPayment } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(request: Request) {
@@ -31,11 +31,17 @@ export async function POST(request: Request) {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    await ensureDatabase();
     await prisma.paymentRecord.updateMany({
       where: { sessionId: session.id },
       data: { status: session.payment_status || "paid" }
     });
+    const payment = await prisma.paymentRecord.findUnique({
+      where: { sessionId: session.id }
+    });
+
+    if (payment && (payment.status === "paid" || session.payment_status === "paid")) {
+      await grantEntitlementForPayment(payment.id);
+    }
   }
 
   return NextResponse.json({ received: true });

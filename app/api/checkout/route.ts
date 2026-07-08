@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { z } from "zod";
 import { getCurrentUser, setSessionCookie } from "@/lib/auth";
-import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
 const checkoutSchema = z.object({
@@ -29,7 +28,6 @@ export async function POST(request: Request) {
           currency: "usd",
           successPath: `${appUrl}/${lang}/success?session_id={CHECKOUT_SESSION_ID}`
         };
-  await ensureDatabase();
   const currentUser = await getCurrentUser();
   const user =
     currentUser ||
@@ -42,44 +40,36 @@ export async function POST(request: Request) {
       : null);
 
   if (provider === "alipay") {
+    if (!process.env.ALIPAY_CHECKOUT_URL) {
+      return NextResponse.json(
+        { error: "Alipay checkout is not configured." },
+        { status: 503 }
+      );
+    }
+
     await prisma.paymentRecord.create({
       data: {
         userId: user?.id,
         provider: "alipay",
         product,
-        status: process.env.ALIPAY_CHECKOUT_URL ? "alipay_created" : "alipay_demo"
+        status: "created",
+        amountCents: productConfig.amountCents,
+        currency: productConfig.currency
       }
     });
 
     const response = NextResponse.json({
-      url:
-        process.env.ALIPAY_CHECKOUT_URL ||
-        (product === "consult_pack"
-          ? `${appUrl}/${lang}/consult?paid=1&provider=alipay&demo=1`
-          : `${appUrl}/${lang}/success?provider=alipay&demo=1`)
+      url: process.env.ALIPAY_CHECKOUT_URL
     });
     if (user) setSessionCookie(response, user.id);
     return response;
   }
 
   if (!process.env.STRIPE_SECRET_KEY) {
-    await prisma.paymentRecord.create({
-      data: {
-        userId: user?.id,
-        provider: "stripe",
-        product,
-        status: "demo_without_stripe_key"
-      }
-    });
-
-    const response = NextResponse.json({
-      url:
-        product === "consult_pack"
-          ? `${appUrl}/${lang}/consult?paid=1&demo=1`
-          : `${appUrl}/${lang}/success?demo=1`
-    });
-    if (user) setSessionCookie(response, user.id);
-    return response;
+    return NextResponse.json(
+      { error: "Stripe checkout is not configured." },
+      { status: 503 }
+    );
   }
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {

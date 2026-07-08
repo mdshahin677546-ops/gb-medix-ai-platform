@@ -5,7 +5,6 @@ import {
   getCurrentUser,
   setSessionCookie
 } from "@/lib/auth";
-import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
 const loginSchema = z.object({
@@ -13,7 +12,6 @@ const loginSchema = z.object({
 });
 
 export async function GET() {
-  await ensureDatabase();
   const user = await getCurrentUser();
   return NextResponse.json({
     user: user ? { id: user.id, email: user.email } : null
@@ -22,7 +20,6 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const { email } = loginSchema.parse(await request.json());
-  await ensureDatabase();
 
   const user = await prisma.user.upsert({
     where: { email },

@@ -2,12 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { GBLogo } from "@/components/GBLogo";
 import { getCurrentMerchant } from "@/lib/auth";
-import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 import { MerchantProductManager } from "./product-manager";
 
 export default async function MerchantDashboardPage() {
-  await ensureDatabase();
   const merchant = await getCurrentMerchant();
 
   if (!merchant) {

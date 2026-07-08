@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
-import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
 const rfqSchema = z.object({
@@ -15,7 +14,6 @@ const rfqSchema = z.object({
 
 export async function POST(request: Request) {
   const input = rfqSchema.parse(await request.json());
-  await ensureDatabase();
   const currentUser = await getCurrentUser();
 
   const user =

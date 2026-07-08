@@ -25,6 +25,7 @@ export function ConsultRoom({ lang }: { lang: Lang }) {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [handoffStatus, setHandoffStatus] = useState("");
+  const [conversationId, setConversationId] = useState("");
 
   useEffect(() => {
     fetch("/api/session")
@@ -45,9 +46,10 @@ export function ConsultRoom({ lang }: { lang: Lang }) {
     const response = await fetch("/api/consult", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lang, messages: nextMessages })
+      body: JSON.stringify({ lang, conversationId: conversationId || undefined, messages: nextMessages })
     });
     const data = await response.json();
+    if (data.conversationId) setConversationId(data.conversationId);
     setRemaining(data.remaining ?? remaining);
 
     if (response.status === 401) {
@@ -88,6 +90,10 @@ export function ConsultRoom({ lang }: { lang: Lang }) {
       })
     });
     const data = await response.json();
+    if (!response.ok || !data.url) {
+      setHandoffStatus(data.error || "Checkout is not available.");
+      return;
+    }
     window.location.href = data.url;
   }
 
@@ -110,7 +116,7 @@ export function ConsultRoom({ lang }: { lang: Lang }) {
     const response = await fetch("/api/consult/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: lastUserMessage, summary })
+      body: JSON.stringify({ question: lastUserMessage, summary, conversationId: conversationId || undefined })
     });
 
     setHandoffStatus(

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Shell } from "@/components/Shell";
 import { getCurrentUser } from "@/lib/auth";
-import { ensureDatabase } from "@/lib/db";
 import { getLang } from "@/lib/lang";
 import { prisma } from "@/lib/prisma";
 
@@ -62,7 +61,6 @@ export default async function DashboardPage({
   params: { lang: string };
 }) {
   const lang = getLang(params.lang);
-  await ensureDatabase();
   const user = await getCurrentUser();
 
   const records = user

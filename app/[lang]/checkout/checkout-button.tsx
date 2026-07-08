@@ -22,6 +22,11 @@ export function CheckoutButton({ lang }: { lang: Lang }) {
       body: JSON.stringify({ lang, provider, email })
     });
     const data = await response.json();
+    if (!response.ok || !data.url) {
+      setError(data.error || "Checkout is not available.");
+      setLoading(false);
+      return;
+    }
     window.location.href = data.url;
   }
 

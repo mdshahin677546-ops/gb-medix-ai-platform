@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
-import { ensureDatabase } from "@/lib/db";
+import {
+  enforceAIUsageBudget,
+  estimateTokens,
+  recordAIUsage
+} from "@/lib/ai-security";
+import { hasActiveEntitlement, PRODUCT_CONSULT_PACK } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 
 const messageSchema = z.object({
@@ -12,6 +17,7 @@ const messageSchema = z.object({
 
 const requestSchema = z.object({
   lang: z.string().default("en"),
+  conversationId: z.string().optional(),
   messages: z.array(messageSchema).min(1).max(12)
 });
 
@@ -23,7 +29,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid consultation request" }, { status: 400 });
   }
 
-  await ensureDatabase();
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Please sign in before consultation." }, { status: 401 });
@@ -32,13 +37,7 @@ export async function POST(request: Request) {
   const used = await prisma.assistantSession.count({
     where: { userId: user.id, mode: "consult" }
   });
-  const hasUnlock = await prisma.paymentRecord.findFirst({
-    where: {
-      userId: user.id,
-      product: "consult_pack",
-      status: { in: ["paid", "demo_without_stripe_key", "alipay_demo"] }
-    }
-  });
+  const hasUnlock = await hasActiveEntitlement(user.id, PRODUCT_CONSULT_PACK);
 
   if (used >= freeLimit && !hasUnlock) {
     return NextResponse.json(
@@ -53,17 +52,41 @@ export async function POST(request: Request) {
     );
   }
 
+  const model = "gpt-4o-mini";
+  const estimatedTokens = estimateTokens(parsed.data.messages);
+  const budgetError = await enforceAIUsageBudget({
+    request,
+    userId: user.id,
+    model,
+    estimatedTokens
+  });
+  if (budgetError) return budgetError;
+
   const lastUserMessage =
     parsed.data.messages.filter((message) => message.role === "user").at(-1)?.content || "";
+  const conversation = await getOrCreateConversation(user.id, parsed.data.conversationId);
+  const messagesToPersist = parsed.data.conversationId
+    ? parsed.data.messages.slice(-1)
+    : parsed.data.messages;
+  await prisma.message.createMany({
+    data: messagesToPersist.map((message) => ({
+      conversationId: conversation.id,
+      role: message.role,
+      content: message.content,
+      tokens: estimateTokens(message.content)
+    }))
+  });
+
   let reply =
     parsed.data.lang === "zh"
       ? "\u6211\u53ef\u4ee5\u5148\u5e2e\u4f60\u628a\u95ee\u9898\u6574\u7406\u6e05\u695a\uff0c\u4f46\u8fd9\u4e0d\u662f\u533b\u751f\u8bca\u65ad\u3002\u5efa\u8bae\u4f60\u8bb0\u5f55\u51fa\u73b0\u65f6\u95f4\u3001\u6301\u7eed\u65f6\u957f\u3001\u4f34\u968f\u611f\u53d7\u548c\u8fd1\u671f\u4f5c\u606f\u996e\u98df\uff0c\u540e\u7eed\u771f\u4eba\u533b\u751f\u5bf9\u63a5\u65f6\u4f1a\u66f4\u6709\u6548\u3002"
       : "I can help organize your question, but this is not a medical diagnosis. Note timing, duration, related sensations, and recent sleep or meal changes so a future licensed doctor can review more efficiently.";
+  let tokens = estimatedTokens;
 
   if (process.env.OPENAI_API_KEY) {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model,
       temperature: 0.3,
       messages: [
         {
@@ -71,12 +94,29 @@ export async function POST(request: Request) {
           content:
             "You are GB Medix AI pre-consultation assistant. The online doctor service is in beta and not currently active. Help users organize symptoms/questions for a future licensed doctor handoff. Never diagnose, prescribe, treat, claim certainty, or replace a doctor. For severe, sudden, or urgent symptoms, advise contacting local emergency services or a qualified clinician."
         },
-        { role: "user", content: `Language: ${parsed.data.lang}\nUser question: ${lastUserMessage}` }
+        ...parsed.data.messages.map((message) => ({
+          role: message.role,
+          content: message.content
+        })),
+        {
+          role: "user",
+          content: `Language: ${parsed.data.lang}\nCurrent focus: ${lastUserMessage}`
+        }
       ]
     });
     reply = completion.choices[0]?.message.content || reply;
+    tokens = completion.usage?.total_tokens || estimatedTokens;
   }
 
+  await recordAIUsage({ request, userId: user.id, model, tokens });
+  await prisma.message.create({
+    data: {
+      conversationId: conversation.id,
+      role: "assistant",
+      content: reply,
+      tokens: estimateTokens(reply)
+    }
+  });
   await prisma.assistantSession.create({
     data: {
       userId: user.id,
@@ -90,6 +130,23 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     reply,
+    conversationId: conversation.id,
     remaining: hasUnlock ? freeLimit : Math.max(0, freeLimit - used - 1)
+  });
+}
+
+async function getOrCreateConversation(userId: string, conversationId?: string) {
+  if (conversationId) {
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, userId, type: "consult" }
+    });
+    if (conversation) return conversation;
+  }
+
+  return prisma.conversation.create({
+    data: {
+      userId,
+      type: "consult"
+    }
   });
 }

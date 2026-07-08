@@ -5,7 +5,6 @@ import {
   getCurrentMerchant,
   setMerchantSessionCookie
 } from "@/lib/auth";
-import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
 const merchantSchema = z.object({
@@ -16,7 +15,6 @@ const merchantSchema = z.object({
 });
 
 export async function GET() {
-  await ensureDatabase();
   const merchant = await getCurrentMerchant();
 
   return NextResponse.json({
@@ -35,7 +33,6 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const input = merchantSchema.parse(await request.json());
-  await ensureDatabase();
 
   const merchant = await prisma.merchant.upsert({
     where: { email: input.email },

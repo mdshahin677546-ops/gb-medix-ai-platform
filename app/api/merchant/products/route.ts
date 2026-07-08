@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentMerchant } from "@/lib/auth";
-import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
 const productSchema = z.object({
@@ -14,7 +13,6 @@ const productSchema = z.object({
 });
 
 export async function GET() {
-  await ensureDatabase();
   const merchant = await getCurrentMerchant();
   if (!merchant) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -30,7 +28,6 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const input = productSchema.parse(await request.json());
-  await ensureDatabase();
   const merchant = await getCurrentMerchant();
   if (!merchant) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

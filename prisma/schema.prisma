@@ -16,6 +16,11 @@ model User {
   rfqRecords        RFQRecord[]
   assistantSessions AssistantSession[]
   consultationOrders ConsultationOrder[]
+  entitlements      Entitlement[]
+  aiUsages          AIUsage[]
+  conversations     Conversation[]
+  aiReports         AIReport[]
+  patientConsents   PatientConsent[]
 }
 
 model Merchant {
@@ -41,6 +46,10 @@ model Product {
   status      String   @default("active")
   createdAt   DateTime @default(now())
   merchant    Merchant @relation(fields: [merchantId], references: [id])
+
+  @@index([merchantId])
+  @@index([status])
+  @@index([category])
 }
 
 model TCMRecord {
@@ -51,6 +60,10 @@ model TCMRecord {
   result    String
   createdAt DateTime @default(now())
   user      User?    @relation(fields: [userId], references: [id])
+  reports   AIReport[]
+
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model PaymentRecord {
@@ -64,6 +77,12 @@ model PaymentRecord {
   currency    String   @default("usd")
   createdAt   DateTime @default(now())
   user        User?    @relation(fields: [userId], references: [id])
+  entitlements Entitlement[]
+
+  @@index([userId])
+  @@index([product])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model RFQRecord {
@@ -77,6 +96,11 @@ model RFQRecord {
   quantity        Int
   createdAt       DateTime @default(now())
   user            User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([email])
+  @@index([country])
+  @@index([createdAt])
 }
 
 model AssistantSession {
@@ -89,6 +113,10 @@ model AssistantSession {
   hasImage  Boolean  @default(false)
   createdAt DateTime @default(now())
   user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([mode])
+  @@index([createdAt])
 }
 
 model Doctor {
@@ -99,6 +127,8 @@ model Doctor {
   status    String              @default("beta")
   createdAt DateTime            @default(now())
   orders    ConsultationOrder[]
+  verification DoctorVerification?
+  patientConsents PatientConsent[]
 }
 
 model ConsultationOrder {
@@ -112,4 +142,115 @@ model ConsultationOrder {
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id])
   doctor    Doctor?  @relation(fields: [doctorId], references: [id])
+
+  @@index([userId])
+  @@index([doctorId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Entitlement {
+  id        String    @id @default(cuid())
+  userId    String
+  productId String
+  paymentId String
+  status    String    @default("active")
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+  payment   PaymentRecord @relation(fields: [paymentId], references: [id])
+
+  @@unique([paymentId, productId])
+  @@index([userId])
+  @@index([productId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model AIUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  ip        String   @default("unknown")
+  model     String
+  tokens    Int
+  cost      Float
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([ip])
+  @@index([model])
+  @@index([createdAt])
+}
+
+model DoctorVerification {
+  id            String   @id @default(cuid())
+  doctorId      String   @unique
+  licenseNumber String
+  country       String
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  doctor        Doctor   @relation(fields: [doctorId], references: [id])
+
+  @@index([status])
+  @@index([country])
+}
+
+model PatientConsent {
+  id        String   @id @default(cuid())
+  userId    String
+  doctorId  String?
+  status    String   @default("granted")
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  doctor    Doctor?  @relation(fields: [doctorId], references: [id])
+
+  @@index([userId])
+  @@index([doctorId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Conversation {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+  messages  Message[]
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           String
+  content        String
+  tokens         Int          @default(0)
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId])
+  @@index([role])
+  @@index([createdAt])
+}
+
+model AIReport {
+  id              String    @id @default(cuid())
+  userId          String
+  assessmentId    String?
+  content         String
+  score           Int
+  recommendations String
+  createdAt       DateTime  @default(now())
+  user            User      @relation(fields: [userId], references: [id])
+  assessment      TCMRecord? @relation(fields: [assessmentId], references: [id])
+
+  @@index([userId])
+  @@index([assessmentId])
+  @@index([score])
+  @@index([createdAt])
 }

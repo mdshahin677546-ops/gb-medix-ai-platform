@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
-import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
 const orderSchema = z.object({
   question: z.string().min(5).max(2000),
-  summary: z.string().max(4000).optional()
+  summary: z.string().max(4000).optional(),
+  conversationId: z.string().optional()
 });
 
 export async function POST(request: Request) {
   const input = orderSchema.parse(await request.json());
-  await ensureDatabase();
   const user = await getCurrentUser();
 
   if (!user) {
@@ -24,6 +23,12 @@ export async function POST(request: Request) {
       question: input.question,
       summary: input.summary || null,
       status: "pending"
+    }
+  });
+  await prisma.patientConsent.create({
+    data: {
+      userId: user.id,
+      status: "granted"
     }
   });
 

@@ -5,18 +5,21 @@ import {
   getCurrentDoctor,
   setDoctorSessionCookie
 } from "@/lib/auth";
-import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
 const doctorSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1).default("Beta Doctor"),
-  specialty: z.string().min(1).default("General wellness")
+  specialty: z.string().min(1).default("General wellness"),
+  licenseNumber: z.string().min(3),
+  country: z.string().min(2)
 });
 
 export async function GET() {
-  await ensureDatabase();
   const doctor = await getCurrentDoctor();
+  const verification = doctor
+    ? await prisma.doctorVerification.findUnique({ where: { doctorId: doctor.id } })
+    : null;
   return NextResponse.json({
     doctor: doctor
       ? {
@@ -24,7 +27,8 @@ export async function GET() {
           email: doctor.email,
           name: doctor.name,
           specialty: doctor.specialty,
-          status: doctor.status
+          status: doctor.status,
+          verificationStatus: verification?.status || "missing"
         }
       : null
   });
@@ -32,7 +36,6 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const input = doctorSchema.parse(await request.json());
-  await ensureDatabase();
 
   const doctor = await prisma.doctor.upsert({
     where: { email: input.email },
@@ -46,6 +49,20 @@ export async function POST(request: Request) {
       specialty: input.specialty
     }
   });
+  const verification = await prisma.doctorVerification.upsert({
+    where: { doctorId: doctor.id },
+    update: {
+      licenseNumber: input.licenseNumber,
+      country: input.country,
+      status: "pending"
+    },
+    create: {
+      doctorId: doctor.id,
+      licenseNumber: input.licenseNumber,
+      country: input.country,
+      status: "pending"
+    }
+  });
 
   const response = NextResponse.json({
     doctor: {
@@ -53,7 +70,8 @@ export async function POST(request: Request) {
       email: doctor.email,
       name: doctor.name,
       specialty: doctor.specialty,
-      status: doctor.status
+      status: doctor.status,
+      verificationStatus: verification.status
     }
   });
   setDoctorSessionCookie(response, doctor.id);
