@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { z } from "zod";
+import { getCurrentUser } from "@/lib/auth";
 import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 import { fallbackResult, parseStructuredResult } from "@/lib/tcm";
@@ -11,6 +12,11 @@ const inputSchema = z.object({
   emotionalState: z.string().min(1),
   dietHabits: z.string().min(1),
   bodySensations: z.string().min(1),
+  digestionPattern: z.string().optional().default(""),
+  thirstPattern: z.string().optional().default(""),
+  activityLevel: z.string().optional().default(""),
+  stressPattern: z.string().optional().default(""),
+  extraNotes: z.string().optional().default(""),
   lang: z.string().default("en")
 });
 
@@ -63,7 +69,12 @@ Sleep quality: ${input.sleepQuality}
 Fatigue level: ${input.fatigueLevel}
 Emotional state: ${input.emotionalState}
 Diet habits: ${input.dietHabits}
-Body sensations: ${input.bodySensations}`
+Body sensations: ${input.bodySensations}
+Digestion pattern: ${input.digestionPattern}
+Thirst and temperature preference: ${input.thirstPattern}
+Activity level: ${input.activityLevel}
+Stress rhythm: ${input.stressPattern}
+Extra notes: ${input.extraNotes}`
         }
       ]
     });
@@ -72,9 +83,12 @@ Body sensations: ${input.bodySensations}`
   }
 
   await ensureDatabase();
+  const user = await getCurrentUser();
 
   const record = await prisma.tCMRecord.create({
     data: {
+      userId: user?.id,
+      kind: "tcm_analysis",
       input: JSON.stringify(input),
       result: JSON.stringify(result)
     }

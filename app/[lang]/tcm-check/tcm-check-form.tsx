@@ -21,7 +21,14 @@ export function TCMCheckForm({
     setError("");
 
     const formData = new FormData(event.currentTarget);
-    const payload = Object.fromEntries(formData.entries());
+    const payload = Array.from(formData.keys()).reduce<Record<string, string>>(
+      (accumulator, key) => {
+        const values = formData.getAll(key).map(String).filter(Boolean);
+        accumulator[key] = values.join(", ");
+        return accumulator;
+      },
+      {}
+    );
 
     const response = await fetch("/api/tcm", {
       method: "POST",
@@ -44,13 +51,13 @@ export function TCMCheckForm({
   return (
     <form
       onSubmit={onSubmit}
-      className="grid max-w-2xl gap-4 rounded-md border border-black/10 bg-white p-5 shadow-sm"
+      className="glass-panel grid max-w-4xl gap-5 rounded-md p-5 shadow-sm"
     >
       {children}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       <button
         disabled={loading}
-        className="rounded-md bg-clay px-5 py-3 font-medium text-white transition hover:bg-ink disabled:opacity-60"
+        className="premium-button rounded-md px-5 py-3 font-medium disabled:opacity-60"
       >
         {loading ? "Analyzing..." : copy[lang].analyze}
       </button>

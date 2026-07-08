@@ -13,7 +13,7 @@ export default function CheckoutPage({ params }: { params: { lang: string } }) {
         </h1>
         <p className="mt-3 text-ink/75">
           Unlock the complete wellness plan, diet suggestions, lifestyle reset, and
-          sleep improvement plan.
+          sleep improvement plan. Choose Stripe or Alipay where available.
         </p>
         <p className="mt-5 text-2xl font-semibold text-leaf">$9.99</p>
         <CheckoutButton lang={lang} />

@@ -8,23 +8,83 @@ datasource db {
 }
 
 model User {
-  id        String          @id @default(cuid())
-  email     String          @unique
-  createdAt DateTime        @default(now())
-  payments  PaymentRecord[]
+  id                String             @id @default(cuid())
+  email             String             @unique
+  createdAt         DateTime           @default(now())
+  payments          PaymentRecord[]
+  tcmRecords        TCMRecord[]
+  rfqRecords        RFQRecord[]
+  assistantSessions AssistantSession[]
+  consultationOrders ConsultationOrder[]
 }
 
 model TCMRecord {
   id        String   @id @default(cuid())
+  userId    String?
+  kind      String   @default("tcm_analysis")
   input     String
   result    String
   createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
 }
 
 model PaymentRecord {
+  id          String   @id @default(cuid())
+  userId      String?
+  provider    String   @default("stripe")
+  product     String   @default("body_reset_plan")
+  sessionId   String?  @unique
+  status      String
+  amountCents Int      @default(999)
+  currency    String   @default("usd")
+  createdAt   DateTime @default(now())
+  user        User?    @relation(fields: [userId], references: [id])
+}
+
+model RFQRecord {
+  id              String   @id @default(cuid())
+  userId          String?
+  name            String
+  company         String
+  email           String
+  country         String
+  productInterest String
+  quantity        Int
+  createdAt       DateTime @default(now())
+  user            User?    @relation(fields: [userId], references: [id])
+}
+
+model AssistantSession {
   id        String   @id @default(cuid())
   userId    String?
-  status    String
+  lang      String
+  mode      String
+  input     String
+  result    String
+  hasImage  Boolean  @default(false)
   createdAt DateTime @default(now())
   user      User?    @relation(fields: [userId], references: [id])
+}
+
+model Doctor {
+  id        String              @id @default(cuid())
+  email     String              @unique
+  name      String
+  specialty String
+  status    String              @default("beta")
+  createdAt DateTime            @default(now())
+  orders    ConsultationOrder[]
+}
+
+model ConsultationOrder {
+  id        String   @id @default(cuid())
+  userId    String
+  doctorId  String?
+  question  String
+  summary   String?
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+  doctor    Doctor?  @relation(fields: [doctorId], references: [id])
 }

@@ -1,21 +1,85 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { z } from "zod";
+import { getCurrentUser, setSessionCookie } from "@/lib/auth";
 import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
+const checkoutSchema = z.object({
+  lang: z.string().default("en"),
+  provider: z.enum(["stripe", "alipay"]).default("stripe"),
+  product: z.enum(["body_reset_plan", "consult_pack"]).default("body_reset_plan"),
+  email: z.string().email().optional().or(z.literal(""))
+});
+
 export async function POST(request: Request) {
-  const { lang = "en" } = await request.json().catch(() => ({ lang: "en" }));
+  const { lang, provider, product, email } = checkoutSchema.parse(await request.json());
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const productConfig =
+    product === "consult_pack"
+      ? {
+          name: "Online Consultation Beta Pack",
+          amountCents: 69,
+          currency: "usd",
+          successPath: `${appUrl}/${lang}/consult?paid=1`
+        }
+      : {
+          name: "Full 7-Day Body Reset Plan",
+          amountCents: 999,
+          currency: "usd",
+          successPath: `${appUrl}/${lang}/success?session_id={CHECKOUT_SESSION_ID}`
+        };
   await ensureDatabase();
+  const currentUser = await getCurrentUser();
+  const user =
+    currentUser ||
+    (email
+      ? await prisma.user.upsert({
+          where: { email },
+          update: {},
+          create: { email }
+        })
+      : null);
+
+  if (provider === "alipay") {
+    await prisma.paymentRecord.create({
+      data: {
+        userId: user?.id,
+        provider: "alipay",
+        product,
+        status: process.env.ALIPAY_CHECKOUT_URL ? "alipay_created" : "alipay_demo"
+      }
+    });
+
+    const response = NextResponse.json({
+      url:
+        process.env.ALIPAY_CHECKOUT_URL ||
+        (product === "consult_pack"
+          ? `${appUrl}/${lang}/consult?paid=1&provider=alipay&demo=1`
+          : `${appUrl}/${lang}/success?provider=alipay&demo=1`)
+    });
+    if (user) setSessionCookie(response, user.id);
+    return response;
+  }
 
   if (!process.env.STRIPE_SECRET_KEY) {
     await prisma.paymentRecord.create({
-      data: { status: "demo_without_stripe_key" }
+      data: {
+        userId: user?.id,
+        provider: "stripe",
+        product,
+        status: "demo_without_stripe_key"
+      }
     });
 
-    return NextResponse.json({
-      url: `${appUrl}/${lang}/success?demo=1`
+    const response = NextResponse.json({
+      url:
+        product === "consult_pack"
+          ? `${appUrl}/${lang}/consult?paid=1&demo=1`
+          : `${appUrl}/${lang}/success?demo=1`
     });
+    if (user) setSessionCookie(response, user.id);
+    return response;
   }
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -24,16 +88,24 @@ export async function POST(request: Request) {
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
-    success_url: `${appUrl}/${lang}/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${appUrl}/${lang}/checkout`,
+    success_url: productConfig.successPath,
+    cancel_url:
+      product === "consult_pack"
+        ? `${appUrl}/${lang}/consult`
+        : `${appUrl}/${lang}/checkout`,
+    customer_email: email || undefined,
+    metadata: {
+      userId: user?.id || "",
+      product
+    },
     line_items: [
       {
         price_data: {
           currency: "usd",
           product_data: {
-            name: "Full 7-Day Body Reset Plan"
+            name: productConfig.name
           },
-          unit_amount: 999
+          unit_amount: productConfig.amountCents
         },
         quantity: 1
       }
@@ -41,8 +113,18 @@ export async function POST(request: Request) {
   });
 
   await prisma.paymentRecord.create({
-    data: { status: session.payment_status || "created" }
+    data: {
+      userId: user?.id,
+      provider: "stripe",
+      product,
+      sessionId: session.id,
+      status: session.payment_status || "created",
+      amountCents: productConfig.amountCents,
+      currency: productConfig.currency
+    }
   });
 
-  return NextResponse.json({ url: session.url });
+  const response = NextResponse.json({ url: session.url });
+  if (user) setSessionCookie(response, user.id);
+  return response;
 }

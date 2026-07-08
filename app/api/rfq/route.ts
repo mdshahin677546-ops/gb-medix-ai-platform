@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getCurrentUser } from "@/lib/auth";
 import { ensureDatabase } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
@@ -15,11 +16,26 @@ const rfqSchema = z.object({
 export async function POST(request: Request) {
   const input = rfqSchema.parse(await request.json());
   await ensureDatabase();
+  const currentUser = await getCurrentUser();
 
-  const record = await prisma.tCMRecord.create({
+  const user =
+    currentUser?.email === input.email
+      ? currentUser
+      : await prisma.user.upsert({
+          where: { email: input.email },
+          update: {},
+          create: { email: input.email }
+        });
+
+  const record = await prisma.rFQRecord.create({
     data: {
-      input: JSON.stringify({ kind: "rfq", ...input }),
-      result: JSON.stringify({ status: "submitted" })
+      userId: user.id,
+      name: input.name,
+      company: input.company,
+      email: input.email,
+      country: input.country,
+      productInterest: input.productInterest,
+      quantity: input.quantity
     }
   });
 

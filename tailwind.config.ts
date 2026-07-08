@@ -10,9 +10,13 @@ const config: Config = {
     extend: {
       colors: {
         ink: "#1e2528",
+        night: "#101615",
         leaf: "#2f6f5e",
+        mint: "#9fe6c1",
         clay: "#a8523a",
-        mist: "#f4f7f5"
+        amber: "#e7b363",
+        mist: "#f4f7f5",
+        pearl: "#fbfaf6"
       }
     }
   },
