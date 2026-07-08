@@ -14,20 +14,30 @@ const loginSchema = z.object({
 export async function GET() {
   const user = await getCurrentUser();
   return NextResponse.json({
-    user: user ? { id: user.id, email: user.email } : null
+    user: user
+      ? {
+          id: user.id,
+          email: user.email,
+          status: user.status,
+          emailVerifiedAt: user.emailVerifiedAt
+        }
+      : null
   });
 }
 
 export async function POST(request: Request) {
   const { email } = loginSchema.parse(await request.json());
 
+  // New users start pending; existing users keep their status (never downgraded).
   const user = await prisma.user.upsert({
     where: { email },
     update: {},
-    create: { email }
+    create: { email, status: "pending" }
   });
 
-  const response = NextResponse.json({ user: { id: user.id, email: user.email } });
+  const response = NextResponse.json({
+    user: { id: user.id, email: user.email, status: user.status }
+  });
   setSessionCookie(response, user.id);
   return response;
 }

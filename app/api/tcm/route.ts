@@ -52,6 +52,12 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Please sign in before AI assessment." }, { status: 401 });
   }
+  if (user.status !== "active") {
+    return NextResponse.json(
+      { error: "Please verify your email before AI assessment." },
+      { status: 403 }
+    );
+  }
 
   const input = parsed.data;
   const model = "gpt-4o-mini";

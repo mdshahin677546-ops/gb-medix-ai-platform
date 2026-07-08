@@ -81,6 +81,12 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Please sign in before using AI." }, { status: 401 });
   }
+  if (user.status !== "active") {
+    return NextResponse.json(
+      { error: "Please verify your email before using AI." },
+      { status: 403 }
+    );
+  }
 
   const model = "gpt-4o-mini";
   const estimatedTokens =
@@ -135,7 +141,7 @@ User message: ${lastUserMessage}`;
     tokens = completion.usage?.total_tokens || estimatedTokens;
   }
 
-  await recordAIUsage({ request, userId: user.id, model, tokens });
+  await recordAIUsage({ request, userId: user.id, model, tokens, endpoint: "/api/assistant" });
   await prisma.assistantSession.create({
     data: {
       userId: user.id,

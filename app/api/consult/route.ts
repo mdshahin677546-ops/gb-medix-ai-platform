@@ -33,6 +33,12 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Please sign in before consultation." }, { status: 401 });
   }
+  if (user.status !== "active") {
+    return NextResponse.json(
+      { error: "Please verify your email before consultation." },
+      { status: 403 }
+    );
+  }
 
   const used = await prisma.assistantSession.count({
     where: { userId: user.id, mode: "consult" }
@@ -108,7 +114,7 @@ export async function POST(request: Request) {
     tokens = completion.usage?.total_tokens || estimatedTokens;
   }
 
-  await recordAIUsage({ request, userId: user.id, model, tokens });
+  await recordAIUsage({ request, userId: user.id, model, tokens, endpoint: "/api/consult" });
   await prisma.message.create({
     data: {
       conversationId: conversation.id,
