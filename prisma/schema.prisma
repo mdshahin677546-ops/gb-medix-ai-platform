@@ -18,6 +18,31 @@ model User {
   consultationOrders ConsultationOrder[]
 }
 
+model Merchant {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  storeName   String
+  contactName String
+  country     String
+  status      String    @default("active")
+  createdAt   DateTime  @default(now())
+  products    Product[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  merchantId  String
+  name        String
+  category    String
+  price       String
+  stock       String
+  imageUrl    String
+  description String
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  merchant    Merchant @relation(fields: [merchantId], references: [id])
+}
+
 model TCMRecord {
   id        String   @id @default(cuid())
   userId    String?

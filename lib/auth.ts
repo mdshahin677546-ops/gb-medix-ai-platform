@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 
 const cookieName = "gbmedix_session";
 const doctorCookieName = "gbmedix_doctor_session";
+const merchantCookieName = "gbmedix_merchant_session";
 
 function secret() {
   return process.env.AUTH_SECRET || "dev-only-change-me";
@@ -83,4 +84,34 @@ export async function getCurrentDoctor() {
   if (!doctorId || !signature || !verify(doctorId, signature)) return null;
 
   return prisma.doctor.findUnique({ where: { id: doctorId } });
+}
+
+export function setMerchantSessionCookie(response: NextResponse, merchantId: string) {
+  response.cookies.set(merchantCookieName, sessionValue(merchantId), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30
+  });
+}
+
+export function clearMerchantSessionCookie(response: NextResponse) {
+  response.cookies.set(merchantCookieName, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0
+  });
+}
+
+export async function getCurrentMerchant() {
+  const raw = cookies().get(merchantCookieName)?.value;
+  if (!raw) return null;
+
+  const [merchantId, signature] = raw.split(".");
+  if (!merchantId || !signature || !verify(merchantId, signature)) return null;
+
+  return prisma.merchant.findUnique({ where: { id: merchantId } });
 }

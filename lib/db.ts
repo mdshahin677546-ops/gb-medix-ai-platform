@@ -96,6 +96,36 @@ async function createSQLiteTables() {
   `);
 
   await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "Merchant" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "email" TEXT NOT NULL UNIQUE,
+      "storeName" TEXT NOT NULL,
+      "contactName" TEXT NOT NULL,
+      "country" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'active',
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "Product" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "merchantId" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "category" TEXT NOT NULL,
+      "price" TEXT NOT NULL,
+      "stock" TEXT NOT NULL,
+      "imageUrl" TEXT NOT NULL,
+      "description" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'active',
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "Product_merchantId_fkey"
+        FOREIGN KEY ("merchantId") REFERENCES "Merchant" ("id")
+        ON DELETE RESTRICT ON UPDATE CASCADE
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "ConsultationOrder" (
       "id" TEXT NOT NULL PRIMARY KEY,
       "userId" TEXT NOT NULL,
@@ -121,6 +151,8 @@ async function createSQLiteTables() {
   await addColumnIfMissing("PaymentRecord", "sessionId", "TEXT");
   await addColumnIfMissing("PaymentRecord", "amountCents", "INTEGER NOT NULL DEFAULT 999");
   await addColumnIfMissing("PaymentRecord", "currency", "TEXT NOT NULL DEFAULT 'usd'");
+  await addColumnIfMissing("Merchant", "status", "TEXT NOT NULL DEFAULT 'active'");
+  await addColumnIfMissing("Product", "status", "TEXT NOT NULL DEFAULT 'active'");
 }
 
 async function addColumnIfMissing(table: string, column: string, definition: string) {

@@ -1,11 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { Lang } from "@/lib/lang";
 
-type Product = {
+export type ShopProduct = {
   name: string;
   zhName: string;
   image: string;
@@ -14,14 +13,15 @@ type Product = {
   stock: string;
   price: string;
   category: "all" | "sleep" | "stress" | "tcm" | "rfq";
+  merchant: string;
   description: string;
 };
 
 const filters = [
-  ["all", "\u5168\u90e8"],
-  ["sleep", "\u7761\u7720"],
-  ["stress", "\u538b\u529b"],
-  ["tcm", "\u4f53\u8d28"],
+  ["all", "全部"],
+  ["sleep", "睡眠"],
+  ["stress", "压力"],
+  ["tcm", "体质"],
   ["rfq", "RFQ"]
 ] as const;
 
@@ -31,13 +31,12 @@ export function ShopExperience({
   addPlanLabel
 }: {
   lang: Lang;
-  products: Product[];
+  products: ShopProduct[];
   addPlanLabel: string;
 }) {
   const [activeFilter, setActiveFilter] = useState<(typeof filters)[number][0]>("all");
-  const [intensity, setIntensity] = useState(86);
+  const [intensity, setIntensity] = useState(84);
   const [selected, setSelected] = useState<string[]>([]);
-  const [spotlight, setSpotlight] = useState(products[0]?.name ?? "");
 
   const visibleProducts = useMemo(
     () =>
@@ -68,25 +67,32 @@ export function ShopExperience({
               AI Product Intelligence
             </p>
             <h1 className="mt-3 text-3xl font-semibold text-ink sm:text-4xl">
-              智能健康商城 / Shop
+              智能健康商城 / Supply Shop
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-ink/65">
-              用 AI 体质信号、生活节律和供应链状态组合推荐商品，让商城更像一个医疗科技选品中心。
+              结合 AI 体质信号、生活节律、库存状态和商家供应能力，给用户展示健康生活方式产品。
+              产品不作为医疗治疗用途，批量采购可进入 RFQ。
             </p>
             <div className="mt-5 flex flex-wrap gap-3">
               <Link
                 href={`/${lang}/assistant`}
                 className="premium-button rounded-md px-5 py-3 text-sm font-semibold"
               >
-                AI 评估推荐
+                AI 推荐
+              </Link>
+              <Link
+                href="/merchant/login"
+                className="rounded-md border border-mint/25 bg-mint/10 px-5 py-3 text-sm font-semibold text-mint transition hover:bg-mint/15"
+              >
+                商家入驻
               </Link>
               <Link
                 href={`/${lang}/rfq`}
-                className="rounded-md border border-mint/25 bg-mint/10 px-5 py-3 text-sm font-semibold text-mint transition hover:bg-mint/15"
+                className="rounded-md border border-sky-400/25 bg-sky-400/10 px-5 py-3 text-sm font-semibold text-sky-200 transition hover:bg-sky-400/15"
               >
                 B2B RFQ
               </Link>
-              <span className="rounded-md border border-sky-400/25 bg-sky-400/10 px-5 py-3 text-sm text-sky-200">
+              <span className="rounded-md border border-white/10 bg-white/5 px-5 py-3 text-sm text-ink/65">
                 已选 {selected.length} / Selected
               </span>
             </div>
@@ -94,12 +100,12 @@ export function ShopExperience({
 
           <div className="grid gap-3 rounded-md border border-white/10 bg-white/5 p-4">
             <p className="text-sm font-semibold text-ink">
-              实时选品信号 / Live Signals
+              实时供应链信号 / Live Supply Signals
             </p>
             {[
-              ["AI Match", `${intensity}%`, "基于睡眠、压力和体质信号"],
-              ["Supply Health", "94%", "供应链库存稳定"],
-              ["RFQ Speed", "12h", "平均报价响应"]
+              ["AI Match", `${intensity}%`, "基于体质、睡眠和生活节律信号"],
+              ["Listed SKUs", String(products.length), "平台与商家商品总数"],
+              ["RFQ Ready", "12h", "预计批量询价响应窗口"]
             ].map(([label, value, note]) => (
               <div
                 key={label}
@@ -158,29 +164,24 @@ export function ShopExperience({
           const active = selected.includes(product.name);
           return (
             <article
-              key={product.name}
-              onMouseEnter={() => setSpotlight(product.name)}
+              key={`${product.merchant}-${product.name}`}
               className="product-card group overflow-hidden rounded-md border border-white/10 bg-[#081827]/80 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:border-mint/40 hover:shadow-[0_24px_80px_rgba(25,211,197,0.16)]"
               style={{ animationDelay: `${index * 80}ms` }}
             >
               <div className="relative aspect-[4/3] overflow-hidden bg-[#04111f]">
-                <Image
+                <img
                   src={product.image}
-                  alt={`${product.name} product image`}
-                  fill
-                  sizes="(min-width: 1280px) 25vw, (min-width: 768px) 50vw, 100vw"
-                  className="object-cover transition duration-500 group-hover:scale-105"
+                  alt={`${product.name} product`}
+                  className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-[#06111d] via-transparent to-transparent" />
                 <div className="product-scan absolute inset-0 opacity-0 transition group-hover:opacity-100" />
                 <span className="absolute left-3 top-3 rounded-md border border-mint/25 bg-[#06111d]/80 px-3 py-1 text-xs text-mint backdrop-blur">
                   {product.tag}
                 </span>
-                {spotlight === product.name ? (
-                  <span className="absolute bottom-3 right-3 rounded-md border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-xs text-sky-100">
-                    Live focus
-                  </span>
-                ) : null}
+                <span className="absolute bottom-3 right-3 rounded-md border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-xs text-sky-100">
+                  {product.merchant}
+                </span>
               </div>
 
               <div className="grid gap-4 p-4">
@@ -233,7 +234,7 @@ export function ShopExperience({
 
       {visibleProducts.length === 0 ? (
         <section className="glass-panel rounded-md p-6 text-center text-ink/65">
-          当前强度下暂无匹配商品，降低推荐强度试试。
+          当前筛选下暂无匹配商品，请降低推荐强度或切换分类。
         </section>
       ) : null}
     </div>

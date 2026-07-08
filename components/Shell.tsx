@@ -11,6 +11,7 @@ const zh = {
   bodyTest: "\u8eab\u4f53\u68c0\u6d4b",
   shop: "\u5546\u57ce",
   rfq: "\u4f9b\u5e94\u94fe",
+  merchant: "\u5546\u5bb6\u7aef",
   account: "\u8d26\u6237",
   console: "\u4e34\u5e8a\u8fd0\u8425\u63a7\u5236\u53f0",
   status: "\u7cfb\u7edf\u72b6\u6001\uff1a\u6b63\u5e38",
@@ -32,6 +33,7 @@ export function Shell({
     { label: zh.bodyTest, sublabel: "Body Test", href: `/${lang}/tcm-check` },
     { label: zh.shop, sublabel: "Shop", href: `/${lang}/shop` },
     { label: zh.rfq, sublabel: "RFQ", href: `/${lang}/rfq` },
+    { label: zh.merchant, sublabel: "Merchant", href: "/merchant/dashboard" },
     { label: zh.account, sublabel: "Account", href: `/${lang}/account` }
   ];
 
