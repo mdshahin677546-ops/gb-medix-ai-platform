@@ -126,12 +126,14 @@ export async function recordAIUsage({
   request,
   userId,
   model,
-  tokens
+  tokens,
+  endpoint = "unknown"
 }: {
   request: Request;
   userId: string;
   model: string;
   tokens: number;
+  endpoint?: string;
 }) {
   await prisma.aIUsage.create({
     data: {
@@ -139,7 +141,8 @@ export async function recordAIUsage({
       ip: clientIp(request),
       model,
       tokens,
-      cost: estimateCost(model, tokens)
+      cost: estimateCost(model, tokens),
+      endpoint
     }
   });
 }

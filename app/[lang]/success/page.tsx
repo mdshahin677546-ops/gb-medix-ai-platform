@@ -47,8 +47,9 @@ export default async function SuccessPage({
         orderBy: { createdAt: "desc" }
       })
     : null;
-  const reportContent = parseReport(report?.content);
-  const recommendations = parseRecommendations(report?.recommendations);
+  const analysis = normalizeAnalysis(report?.analysis);
+  const recommendations = normalizeRecommendations(report?.recommendations);
+  const lifestylePlan = normalizeStringList(report?.lifestylePlan);
 
   return (
     <Shell lang={lang}>
@@ -60,23 +61,16 @@ export default async function SuccessPage({
           {report ? (
             <>
               <ReportSection title="Body Insight">
-                {reportContent.bodyInsight || "No body insight available."}
+                {report.summary || "No body insight available."}
               </ReportSection>
               <ReportSection title="Constitution Type">
-                {reportContent.constitutionType || "No constitution type available."}
+                {analysis.constitution || "No constitution type available."}
               </ReportSection>
               <ReportSection title="What Your Body Is Telling You">
-                {reportContent.whatYourBodyIsTellingYou ||
-                  "No body signal explanation available."}
+                {analysis.summary || report.summary || "No body signal explanation available."}
               </ReportSection>
-              <PlanSection
-                title="Lifestyle Suggestions"
-                items={reportContent.lifestyleSuggestions || []}
-              />
-              <PlanSection
-                title="7-Day Plan Preview"
-                items={reportContent.sevenDayPlanPreview || []}
-              />
+              <PlanSection title="Lifestyle Suggestions" items={recommendations} />
+              <PlanSection title="7-Day Plan Preview" items={lifestylePlan} />
               <PlanSection title="Recommendations" items={recommendations} />
               <ReportSection title="AI Score">{String(report.score)}/100</ReportSection>
             </>
@@ -153,29 +147,25 @@ async function verifyUnlock(
   return hasActiveEntitlement(userId, PRODUCT_BODY_RESET_PLAN);
 }
 
-function parseReport(value?: string) {
-  if (!value) return {};
-  try {
-    return JSON.parse(value) as {
-      bodyInsight?: string;
-      constitutionType?: string;
-      whatYourBodyIsTellingYou?: string;
-      lifestyleSuggestions?: string[];
-      sevenDayPlanPreview?: string[];
-    };
-  } catch {
-    return {};
+function normalizeAnalysis(value: unknown) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as { constitution?: string; summary?: string };
   }
+  return {};
 }
 
-function parseRecommendations(value?: string) {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
+function normalizeRecommendations(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (item && typeof item === "object" && "content" in item) {
+      return String((item as { content: unknown }).content);
+    }
+    return String(item);
+  });
+}
+
+function normalizeStringList(value: unknown) {
+  return Array.isArray(value) ? value.map(String) : [];
 }
 
 function ReportSection({

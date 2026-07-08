@@ -8,7 +8,12 @@ import {
   recordAIUsage
 } from "@/lib/ai-security";
 import { prisma } from "@/lib/prisma";
-import { fallbackResult, parseStructuredResult } from "@/lib/tcm";
+import {
+  fallbackStructuredReport,
+  ReportSchema,
+  reportJsonInstruction,
+  structuredReportToTCMResult
+} from "@/lib/report-schema";
 
 const inputSchema = z.object({
   sleepQuality: z.string().min(1),
@@ -35,24 +40,7 @@ Rules:
 * Only provide wellness insights, body pattern analysis, lifestyle suggestions, and TCM-inspired constitution classification.
 * Do not provide emergency medical instructions.
 * Keep conversion language curious and reflective, not salesy.
-
-Output MUST be structured exactly as:
-
-## Body Insight
-
-## Constitution Type
-
-## What Your Body Is Telling You
-
-## Lifestyle Suggestions
-
-## Risk Level
-
-## Hidden Signals (3 not fully revealed insights)
-
-## 7-Day Plan Preview (30%)
-
-## Upgrade CTA ($9.99)`;
+* ${reportJsonInstruction()}`;
 
 export async function POST(request: Request) {
   const parsed = inputSchema.safeParse(await request.json());
@@ -76,7 +64,7 @@ export async function POST(request: Request) {
   });
   if (budgetError) return budgetError;
 
-  let result = fallbackResult;
+  let report = fallbackStructuredReport();
   let tokens = estimatedTokens;
 
   if (process.env.OPENAI_API_KEY) {
@@ -84,6 +72,7 @@ export async function POST(request: Request) {
     const completion = await openai.chat.completions.create({
       model,
       temperature: 0.5,
+      response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
         {
@@ -104,11 +93,29 @@ Extra notes: ${input.extraNotes}`
       ]
     });
 
-    result = parseStructuredResult(completion.choices[0]?.message.content || "");
+    const content = completion.choices[0]?.message.content || "";
+    let rawReport: unknown;
+    try {
+      rawReport = JSON.parse(content);
+    } catch {
+      return NextResponse.json(
+        { error: "AI report output was not valid JSON." },
+        { status: 502 }
+      );
+    }
+    const parsedReport = ReportSchema.safeParse(rawReport);
+    if (!parsedReport.success) {
+      return NextResponse.json(
+        { error: "AI report output failed schema validation." },
+        { status: 502 }
+      );
+    }
+    report = parsedReport.data;
     tokens = completion.usage?.total_tokens || estimatedTokens;
   }
 
-  await recordAIUsage({ request, userId: user.id, model, tokens });
+  await recordAIUsage({ request, userId: user.id, model, tokens, endpoint: "/api/tcm" });
+  const result = structuredReportToTCMResult(report);
 
   const record = await prisma.tCMRecord.create({
     data: {
@@ -122,24 +129,16 @@ Extra notes: ${input.extraNotes}`
     data: {
       userId: user.id,
       assessmentId: record.id,
-      content: JSON.stringify(result),
-      score: scoreFromRisk(result.riskLevel),
-      recommendations: JSON.stringify(buildRecommendations(result))
+      type: "tcm_assessment",
+      status: "completed",
+      score: report.healthScore,
+      summary: report.summary,
+      analysis: report,
+      recommendations: report.recommendations,
+      lifestylePlan: report.lifestylePlan,
+      productSuggestions: report.productSuggestions
     }
   });
 
   return NextResponse.json({ id: record.id, result });
-}
-
-function scoreFromRisk(riskLevel: string) {
-  if (riskLevel === "HIGH") return 45;
-  if (riskLevel === "MEDIUM") return 68;
-  return 84;
-}
-
-function buildRecommendations(result: typeof fallbackResult) {
-  return [
-    ...result.lifestyleSuggestions.slice(0, 3),
-    ...result.sevenDayPlanPreview.slice(0, 2)
-  ];
 }
