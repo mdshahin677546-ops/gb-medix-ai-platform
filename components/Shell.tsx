@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AppNav } from "@/components/AppNav";
+import { GBLogo } from "@/components/GBLogo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { copy, type Lang } from "@/lib/lang";
 
@@ -44,13 +45,7 @@ export function Shell({
               href={`/${lang}/dashboard`}
               className="flex items-center gap-3 px-2 text-lg font-semibold text-ink"
             >
-              <span className="brand-mark rounded-md text-sm font-bold">GB</span>
-              <span>
-                <span className="block leading-5">GB Medix</span>
-                <span className="block text-xs font-medium text-ink/55">
-                  AI Platform
-                </span>
-              </span>
+              <GBLogo />
             </Link>
 
             <AppNav items={navItems} className="mt-8 grid gap-1 text-sm" />
@@ -74,8 +69,7 @@ export function Shell({
                 href={`/${lang}/assistant`}
                 className="flex items-center gap-3 text-lg font-semibold text-ink lg:hidden"
               >
-                <span className="brand-mark rounded-md text-sm font-bold">GB</span>
-                <span>GB Medix AI</span>
+                <GBLogo size="sm" />
               </Link>
 
               <div className="hidden items-center gap-3 text-sm text-ink/65 lg:flex">

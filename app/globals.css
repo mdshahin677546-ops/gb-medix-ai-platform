@@ -89,6 +89,76 @@ textarea {
   width: 36px;
 }
 
+.gb-logo-mark {
+  background:
+    radial-gradient(circle at 50% 26%, rgba(255, 255, 255, 0.24), transparent 28%),
+    radial-gradient(circle at 50% 75%, rgba(99, 245, 215, 0.16), transparent 46%),
+    linear-gradient(145deg, rgba(226, 235, 244, 0.16), rgba(39, 52, 67, 0.88) 48%, rgba(7, 16, 27, 0.98)),
+    #101928;
+  border: 1px solid rgba(213, 224, 234, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(99, 245, 215, 0.08) inset,
+    0 0 32px rgba(99, 245, 215, 0.2),
+    0 18px 42px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.gb-logo-mark::before {
+  animation: gb-logo-orbit 4.6s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, rgba(99, 245, 215, 0.52), transparent);
+  content: "";
+  height: 1px;
+  left: -35%;
+  position: absolute;
+  top: 50%;
+  width: 170%;
+  z-index: 1;
+}
+
+.gb-logo-mark::after {
+  background: radial-gradient(circle, rgba(99, 245, 215, 0.32), transparent 62%);
+  content: "";
+  filter: blur(8px);
+  inset: 12%;
+  opacity: 0;
+  position: absolute;
+  transition: opacity 220ms ease;
+}
+
+.group:hover .gb-logo-mark::after {
+  opacity: 1;
+}
+
+.gb-wordmark {
+  align-items: baseline;
+  background: linear-gradient(180deg, #ffffff 0%, #d8e2ed 42%, #8795a5 100%);
+  background-clip: text;
+  color: transparent;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 0.34em;
+  letter-spacing: 0.09em;
+  position: relative;
+  text-shadow: 0 0 18px rgba(163, 225, 255, 0.16);
+}
+
+.gb-wordmark::after {
+  background: linear-gradient(90deg, transparent, rgba(99, 245, 215, 0.72), transparent);
+  bottom: -0.35rem;
+  content: "";
+  height: 1px;
+  left: 0.08em;
+  position: absolute;
+  right: 0.42em;
+}
+
+.gb-wordmark-accent {
+  background: linear-gradient(180deg, #bffcff 0%, #63f5d7 48%, #14a8ff 100%);
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 20px rgba(99, 245, 215, 0.28);
+}
+
 .premium-button {
   background: linear-gradient(135deg, #19d3c5 0%, #0b7cff 100%);
   box-shadow: 0 14px 34px rgba(25, 211, 197, 0.28);
@@ -152,4 +222,111 @@ textarea {
 .scan-image {
   filter: drop-shadow(0 0 32px rgba(25, 211, 197, 0.26));
   mix-blend-mode: screen;
+}
+
+.scanner-line {
+  animation: scan-sweep 5.8s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, rgba(99, 245, 215, 0.22), transparent);
+  height: 1px;
+  left: -20%;
+  pointer-events: none;
+  position: absolute;
+  right: -20%;
+  top: 0;
+  z-index: 1;
+}
+
+.product-card {
+  animation: card-rise 520ms ease both;
+  position: relative;
+}
+
+.product-card::after {
+  background: radial-gradient(circle at 50% 0%, rgba(99, 245, 215, 0.2), transparent 45%);
+  content: "";
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transition: opacity 180ms ease;
+}
+
+.product-card:hover::after {
+  opacity: 1;
+}
+
+.product-scan {
+  animation: product-scan 2.4s ease-in-out infinite;
+  background: linear-gradient(180deg, transparent 0%, rgba(99, 245, 215, 0.22) 48%, transparent 100%);
+  transform: translateY(-100%);
+}
+
+.signal-meter {
+  animation: signal-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 18px rgba(99, 245, 215, 0.42);
+}
+
+@keyframes card-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes product-scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  55%,
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes scan-sweep {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateX(-20%);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(20%);
+  }
+}
+
+@keyframes signal-pulse {
+  0%,
+  100% {
+    opacity: 0.78;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes gb-logo-orbit {
+  0%,
+  100% {
+    opacity: 0.34;
+    transform: translateY(-13px) rotate(-18deg);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(13px) rotate(-18deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanner-line,
+  .product-card,
+  .product-scan,
+  .signal-meter,
+  .gb-logo-mark::before {
+    animation: none;
+  }
 }

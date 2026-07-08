@@ -16,6 +16,7 @@ const inputSchema = z.object({
   thirstPattern: z.string().optional().default(""),
   activityLevel: z.string().optional().default(""),
   stressPattern: z.string().optional().default(""),
+  uploadSummary: z.string().optional().default(""),
   extraNotes: z.string().optional().default(""),
   lang: z.string().default("en")
 });
@@ -74,6 +75,7 @@ Digestion pattern: ${input.digestionPattern}
 Thirst and temperature preference: ${input.thirstPattern}
 Activity level: ${input.activityLevel}
 Stress rhythm: ${input.stressPattern}
+Uploaded context: ${input.uploadSummary || "No uploaded file"}
 Extra notes: ${input.extraNotes}`
         }
       ]
