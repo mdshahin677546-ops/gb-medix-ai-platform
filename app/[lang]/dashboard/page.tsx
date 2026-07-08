@@ -6,7 +6,7 @@ import { getLang } from "@/lib/lang";
 import { prisma } from "@/lib/prisma";
 
 const zh = {
-  title: "\u6570\u636e\u770b\u677f / Operations Dashboard",
+  title: "\u6570\u636e\u770b\u677f",
   subtitle: "\u805a\u5408 AI \u95ee\u8bca\u3001\u4f53\u8d28\u68c0\u6d4b\u3001\u652f\u4ed8\u548c RFQ \u8bb0\u5f55\uff0c\u7528\u4e00\u4e2a\u63a7\u5236\u53f0\u8ddf\u8fdb\u5065\u5eb7\u4e0e\u4f9b\u5e94\u94fe\u72b6\u6001\u3002",
   signedOut: "\u672a\u767b\u5f55\u6a21\u5f0f",
   signedOutCopy: "\u767b\u5f55\u540e\u53ef\u4ee5\u67e5\u770b\u4f60\u7684\u771f\u5b9e\u62a5\u544a\u3001\u652f\u4ed8\u548c\u8be2\u76d8\u8bb0\u5f55\u3002\u5f53\u524d\u5c55\u793a\u4e3a\u8fd0\u8425\u9884\u89c8\u6570\u636e\u3002",
@@ -19,17 +19,41 @@ const zh = {
 };
 
 const fallbackMetrics = [
-  ["AI \u95ee\u8bca", "Assistant Sessions", "24", "+18%"],
-  ["\u4f53\u8d28\u62a5\u544a", "Body Reports", "12", "+6%"],
-  ["RFQ \u8be2\u76d8", "Supply RFQs", "8", "+3"],
-  ["\u652f\u4ed8\u8bb0\u5f55", "Payments", "5", "stable"]
+  {
+    en: ["AI Consults", "Assistant Sessions", "24", "+18%"],
+    zh: ["AI \u95ee\u8bca", "\u52a9\u624b\u4f1a\u8bdd", "24", "+18%"]
+  },
+  {
+    en: ["Body Reports", "Body Pattern Scans", "12", "+6%"],
+    zh: ["\u4f53\u8d28\u62a5\u544a", "\u8eab\u4f53\u68c0\u6d4b", "12", "+6%"]
+  },
+  {
+    en: ["Supply RFQs", "Supplier Requests", "8", "+3"],
+    zh: ["RFQ \u8be2\u76d8", "\u4f9b\u5e94\u94fe\u8bf7\u6c42", "8", "+3"]
+  },
+  {
+    en: ["Payments", "Payment Records", "5", "stable"],
+    zh: ["\u652f\u4ed8\u8bb0\u5f55", "\u4ed8\u6b3e\u72b6\u6001", "5", "\u7a33\u5b9a"]
+  }
 ];
 
 const pipeline = [
-  ["AI pre-consult", "82%", "\u5df2\u5b8c\u6210\u521d\u6b65\u5206\u6790"],
-  ["Body pattern", "72%", "\u4f53\u8d28\u6570\u636e\u53ef\u7528"],
-  ["RFQ review", "64%", "\u4f9b\u5e94\u5546\u62a5\u4ef7\u4e2d"],
-  ["Doctor handoff", "38%", "\u7b49\u5f85\u4e13\u4eba\u590d\u6838"]
+  {
+    en: ["AI pre-consult", "82%", "Initial analysis completed"],
+    zh: ["AI \u9884\u95ee\u8bca", "82%", "\u5df2\u5b8c\u6210\u521d\u6b65\u5206\u6790"]
+  },
+  {
+    en: ["Body pattern", "72%", "Body pattern data available"],
+    zh: ["\u4f53\u8d28\u6570\u636e", "72%", "\u4f53\u8d28\u6570\u636e\u53ef\u7528"]
+  },
+  {
+    en: ["RFQ review", "64%", "Supplier quotes in progress"],
+    zh: ["RFQ \u590d\u6838", "64%", "\u4f9b\u5e94\u5546\u62a5\u4ef7\u4e2d"]
+  },
+  {
+    en: ["Doctor handoff", "38%", "Waiting for clinical review"],
+    zh: ["\u533b\u751f\u4ea4\u63a5", "38%", "\u7b49\u5f85\u4e13\u4eba\u590d\u6838"]
+  }
 ];
 
 export default async function DashboardPage({
@@ -69,12 +93,26 @@ export default async function DashboardPage({
   const [tcmRecords, assistantSessions, payments, rfqs] = records;
   const metrics = user
     ? [
-        ["AI \u95ee\u8bca", "Assistant Sessions", String(assistantSessions.length), "latest 5"],
-        ["\u4f53\u8d28\u62a5\u544a", "Body Reports", String(tcmRecords.length), "latest 5"],
-        ["RFQ \u8be2\u76d8", "Supply RFQs", String(rfqs.length), "latest 5"],
-        ["\u652f\u4ed8\u8bb0\u5f55", "Payments", String(payments.length), "latest 5"]
+        {
+          en: ["AI Consults", "Assistant Sessions", String(assistantSessions.length), "latest 5"],
+          zh: ["AI \u95ee\u8bca", "\u52a9\u624b\u4f1a\u8bdd", String(assistantSessions.length), "\u6700\u8fd1 5 \u6761"]
+        },
+        {
+          en: ["Body Reports", "Body Pattern Scans", String(tcmRecords.length), "latest 5"],
+          zh: ["\u4f53\u8d28\u62a5\u544a", "\u8eab\u4f53\u68c0\u6d4b", String(tcmRecords.length), "\u6700\u8fd1 5 \u6761"]
+        },
+        {
+          en: ["Supply RFQs", "Supplier Requests", String(rfqs.length), "latest 5"],
+          zh: ["RFQ \u8be2\u76d8", "\u4f9b\u5e94\u94fe\u8bf7\u6c42", String(rfqs.length), "\u6700\u8fd1 5 \u6761"]
+        },
+        {
+          en: ["Payments", "Payment Records", String(payments.length), "latest 5"],
+          zh: ["\u652f\u4ed8\u8bb0\u5f55", "\u4ed8\u6b3e\u72b6\u6001", String(payments.length), "\u6700\u8fd1 5 \u6761"]
+        }
       ]
     : fallbackMetrics;
+  const localizedMetrics = metrics.map((item) => (lang === "zh" ? item.zh : item.en));
+  const localizedPipeline = pipeline.map((item) => (lang === "zh" ? item.zh : item.en));
 
   return (
     <Shell lang={lang}>
@@ -120,7 +158,7 @@ export default async function DashboardPage({
         </section>
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {metrics.map(([label, sublabel, value, trend]) => (
+          {localizedMetrics.map(([label, sublabel, value, trend]) => (
             <div key={label} className="metric-tile rounded-md p-5">
               <p className="text-sm text-ink/55">{label}</p>
               <p className="mt-1 text-xs text-ink/35">{sublabel}</p>
@@ -141,7 +179,7 @@ export default async function DashboardPage({
               </span>
             </div>
             <div className="grid gap-4">
-              {pipeline.map(([label, progress, detail]) => (
+              {localizedPipeline.map(([label, progress, detail]) => (
                 <div key={label} className="rounded-md border border-white/10 bg-white/5 p-4">
                   <div className="flex items-center justify-between gap-3 text-sm">
                     <span className="font-medium text-ink">{label}</span>
