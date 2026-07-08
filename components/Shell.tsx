@@ -35,7 +35,7 @@ export function Shell({
   ];
 
   return (
-    <main className="command-shell ambient-grid min-h-screen">
+    <main className="command-shell ambient-grid min-h-screen overflow-x-hidden">
       <div className="signal-strip fixed inset-x-0 top-0 z-40" />
       <div className="grid min-h-screen lg:grid-cols-[260px_1fr]">
         <aside className="hidden border-r border-white/10 bg-[#030914]/90 backdrop-blur-xl lg:block">
