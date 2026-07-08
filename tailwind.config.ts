@@ -9,14 +9,14 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#1e2528",
-        night: "#101615",
-        leaf: "#2f6f5e",
-        mint: "#9fe6c1",
-        clay: "#a8523a",
-        amber: "#e7b363",
-        mist: "#f4f7f5",
-        pearl: "#fbfaf6"
+        ink: "#e7f4ff",
+        night: "#06111d",
+        leaf: "#19d3c5",
+        mint: "#63f5d7",
+        clay: "#ff6b6b",
+        amber: "#ffd166",
+        mist: "#0b1b2a",
+        pearl: "#f6fbff"
       }
     }
   },

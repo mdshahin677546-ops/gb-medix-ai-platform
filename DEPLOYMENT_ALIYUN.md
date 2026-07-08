@@ -18,13 +18,15 @@ NEXT_PUBLIC_APP_URL="https://ai.yourdomain.com"
 
 ## Alibaba Cloud DNS
 
-Recommended subdomain:
+Configured target domain for this project:
 
 ```text
-ai.yourdomain.com
+ai.gbmedix.com
 ```
 
-In Alibaba Cloud DNS, add the record Vercel gives you:
+Current recommendation: keep `gbmedix.com` untouched and bind the AI platform to `ai.gbmedix.com`.
+
+In your active DNS provider, add the record Vercel gives you:
 
 ```text
 Type: CNAME
@@ -39,7 +41,7 @@ If Vercel provides a different target, use the exact target shown in Vercel.
 1. Push this repository to GitHub.
 2. Import the GitHub repository into Vercel.
 3. Add the environment variables above.
-4. Add `ai.yourdomain.com` in Vercel Project Settings -> Domains.
+4. Add `ai.gbmedix.com` in Vercel Project Settings -> Domains.
 5. Copy the DNS value Vercel shows.
 6. Add that DNS record in Alibaba Cloud DNS.
 7. Wait for DNS propagation and SSL issuance.
@@ -50,7 +52,7 @@ If Vercel provides a different target, use the exact target shown in Vercel.
 - Configure Stripe webhook to point to:
 
 ```text
-https://ai.yourdomain.com/api/webhooks/stripe
+https://ai.gbmedix.com/api/webhooks/stripe
 ```
 
 - Keep doctor services marked beta until doctor verification, compliance, and operating policies are ready.
