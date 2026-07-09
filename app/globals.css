@@ -91,9 +91,9 @@ textarea {
 
 .gb-logo-mark {
   background:
-    radial-gradient(circle at 50% 26%, rgba(255, 255, 255, 0.24), transparent 28%),
-    radial-gradient(circle at 50% 75%, rgba(99, 245, 215, 0.16), transparent 46%),
-    linear-gradient(145deg, rgba(226, 235, 244, 0.16), rgba(39, 52, 67, 0.88) 48%, rgba(7, 16, 27, 0.98)),
+    radial-gradient(circle at 50% 42%, rgba(245, 251, 255, 0.12), transparent 35%),
+    radial-gradient(circle at 50% 75%, rgba(20, 168, 255, 0.18), transparent 48%),
+    linear-gradient(145deg, rgba(226, 235, 244, 0.12), rgba(19, 38, 61, 0.9) 50%, rgba(4, 12, 24, 0.98)),
     #101928;
   border: 1px solid rgba(213, 224, 234, 0.28);
   box-shadow:
@@ -101,6 +101,11 @@ textarea {
     0 0 32px rgba(99, 245, 215, 0.2),
     0 18px 42px rgba(0, 0, 0, 0.35);
   overflow: hidden;
+  transform: translateY(0) scale(1);
+  transition:
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    transform 220ms ease;
 }
 
 .gb-logo-mark::before {
@@ -129,6 +134,16 @@ textarea {
   opacity: 1;
 }
 
+.group:hover .gb-logo-mark,
+.group:focus-within .gb-logo-mark {
+  border-color: rgba(99, 245, 215, 0.46);
+  box-shadow:
+    0 0 0 1px rgba(99, 245, 215, 0.16) inset,
+    0 0 42px rgba(99, 245, 215, 0.32),
+    0 18px 48px rgba(20, 168, 255, 0.18);
+  transform: translateY(-1px) scale(1.03);
+}
+
 .gb-wordmark {
   align-items: baseline;
   background: linear-gradient(180deg, #ffffff 0%, #d8e2ed 42%, #8795a5 100%);
@@ -140,6 +155,87 @@ textarea {
   letter-spacing: 0.09em;
   position: relative;
   text-shadow: 0 0 18px rgba(163, 225, 255, 0.16);
+}
+
+.gb-wordmark-switch {
+  min-height: 1.25em;
+  min-width: 9.6rem;
+  overflow: hidden;
+}
+
+.gb-wordmark-switch::before {
+  background: linear-gradient(90deg, transparent, rgba(99, 245, 215, 0.78), transparent);
+  content: "";
+  height: 100%;
+  left: -45%;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transform: skewX(-18deg);
+  width: 42%;
+  z-index: 2;
+}
+
+.gb-wordmark-face {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 0.34em;
+  pointer-events: none;
+  transition:
+    filter 220ms ease,
+    opacity 220ms ease,
+    transform 220ms ease;
+  white-space: nowrap;
+}
+
+.gb-wordmark-primary {
+  background: linear-gradient(180deg, #ffffff 0%, #d8e2ed 42%, #8795a5 100%);
+  background-clip: text;
+  color: transparent;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.gb-wordmark-reveal {
+  background: linear-gradient(180deg, #ffffff 0%, #cbd5df 30%, #7c8797 58%, #27d7ff 100%);
+  background-clip: text;
+  color: transparent;
+  font-size: 0.82em;
+  gap: 0;
+  left: 0;
+  letter-spacing: 0.04em;
+  opacity: 0;
+  position: absolute;
+  text-shadow:
+    0 0 16px rgba(163, 225, 255, 0.2),
+    0 0 26px rgba(39, 215, 255, 0.16);
+  top: 0;
+  transform: translateY(0.55em) scale(0.96);
+}
+
+.group:hover .gb-wordmark-switch::before,
+.group:focus-within .gb-wordmark-switch::before {
+  animation: gb-wordmark-scan 520ms ease forwards;
+}
+
+.group:hover .gb-wordmark-primary,
+.group:focus-within .gb-wordmark-primary {
+  filter: blur(4px);
+  opacity: 0;
+  transform: translateY(-0.55em) scale(0.97);
+}
+
+.group:hover .gb-wordmark-reveal,
+.group:focus-within .gb-wordmark-reveal {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.group:hover .gb-wordmark::after,
+.group:focus-within .gb-wordmark::after {
+  left: 0;
+  right: 0;
 }
 
 .gb-wordmark::after {
@@ -321,12 +417,32 @@ textarea {
   }
 }
 
+@keyframes gb-wordmark-scan {
+  0% {
+    left: -45%;
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.8;
+  }
+  100% {
+    left: 112%;
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scanner-line,
   .product-card,
   .product-scan,
   .signal-meter,
-  .gb-logo-mark::before {
+  .gb-logo-mark::before,
+  .gb-wordmark-switch::before {
     animation: none;
+  }
+
+  .gb-logo-mark,
+  .gb-wordmark-face {
+    transition: none;
   }
 }

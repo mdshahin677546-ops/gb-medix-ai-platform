@@ -16,6 +16,7 @@ type ConsentStatus = {
   required: boolean;
   accepted: boolean;
   consentVersion: string;
+  acceptedAt?: string | null;
 };
 
 export function TCMCheckForm({
@@ -33,6 +34,8 @@ export function TCMCheckForm({
   const [consentStatus, setConsentStatus] = useState<ConsentStatus | null>(null);
   const [consentChecked, setConsentChecked] = useState(false);
   const [consentLoading, setConsentLoading] = useState(false);
+  const [consentMessage, setConsentMessage] = useState("");
+  const [consentStatusLoading, setConsentStatusLoading] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -40,11 +43,14 @@ export function TCMCheckForm({
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (data) setConsentStatus(data);
+        setConsentStatusLoading(false);
       })
-      .catch(() => undefined);
+      .catch(() => setConsentStatusLoading(false));
   }, []);
 
   const consentRequired = Boolean(consentStatus?.required && !consentStatus.accepted);
+  const consentAccepted = Boolean(consentStatus?.required && consentStatus.accepted);
+  const submitDisabled = loading || consentStatusLoading || consentRequired;
 
   async function acceptConsent() {
     setConsentLoading(true);
@@ -63,6 +69,12 @@ export function TCMCheckForm({
     }
 
     setConsentStatus(data);
+    setConsentChecked(false);
+    setConsentMessage(
+      lang === "zh"
+        ? "\u5df2\u4fdd\u5b58\u540c\u610f\u3002\u73b0\u5728\u53ef\u4ee5\u5f00\u59cb\u5065\u5eb7\u8bc4\u4f30\u3002"
+        : "Consent saved. You can now start the health assessment."
+    );
   }
 
   function setUpload(file?: File) {
@@ -152,20 +164,63 @@ export function TCMCheckForm({
       onSubmit={onSubmit}
       className="glass-panel grid max-w-5xl gap-5 overflow-hidden rounded-md p-5 shadow-sm"
     >
+      <section className="grid gap-3 rounded-md border border-white/10 bg-white/[0.04] p-4 sm:grid-cols-3">
+        <FlowStep
+          active
+          done={!consentRequired && !consentStatusLoading}
+          label={lang === "zh" ? "\u6b65\u9aa4 1" : "Step 1"}
+          title={lang === "zh" ? "AI \u5904\u7406\u544a\u77e5" : "AI processing notice"}
+          detail={
+            consentStatusLoading
+              ? lang === "zh"
+                ? "\u6b63\u5728\u68c0\u67e5"
+                : "Checking"
+              : consentRequired
+                ? lang === "zh"
+                  ? "\u9700\u8981\u786e\u8ba4"
+                  : "Action required"
+                : lang === "zh"
+                  ? "\u5df2\u5c31\u7eea"
+                  : "Ready"
+          }
+        />
+        <FlowStep
+          active={!consentRequired}
+          done={false}
+          label={lang === "zh" ? "\u6b65\u9aa4 2" : "Step 2"}
+          title={lang === "zh" ? "\u5b8c\u6210\u95ee\u5377" : "Complete intake"}
+          detail={lang === "zh" ? "\u7761\u7720\u3001\u996e\u98df\u3001\u538b\u529b\u7b49" : "Sleep, diet, stress, rhythm"}
+        />
+        <FlowStep
+          active={!consentRequired}
+          done={false}
+          label={lang === "zh" ? "\u6b65\u9aa4 3" : "Step 3"}
+          title={lang === "zh" ? "\u67e5\u770b\u62a5\u544a" : "View report"}
+          detail={lang === "zh" ? "\u5065\u5eb7\u7ba1\u7406\u5efa\u8bae" : "Health management guidance"}
+        />
+      </section>
+
       {consentRequired ? (
-        <section className="rounded-md border border-amber/30 bg-amber/10 p-4 text-sm text-ink">
-          <p className="font-semibold text-amber">
-            {lang === "zh" ? "\u7b2c\u4e09\u65b9 AI \u5904\u7406\u544a\u77e5" : "Third-party AI processing notice"}
-          </p>
+        <section className="rounded-md border border-amber/30 bg-amber/10 p-4 text-sm text-ink shadow-[0_0_32px_rgba(245,170,66,0.08)]">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber">
+                {lang === "zh" ? "\u5fc5\u987b\u5b8c\u6210" : "Required before assessment"}
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-ink">
+                {lang === "zh" ? "\u7b2c\u4e09\u65b9 AI \u5904\u7406\u544a\u77e5" : "Third-party AI processing notice"}
+              </h2>
+            </div>
+            <span className="rounded-md border border-amber/30 bg-white/45 px-3 py-1 text-xs font-medium text-ink">
+              {consentStatus?.provider}
+            </span>
+          </div>
           <p className="mt-2 leading-6 text-ink/75">
             {lang === "zh"
               ? "\u6211\u540c\u610f GB Medix \u4f7f\u7528\u7b2c\u4e09\u65b9 AI \u670d\u52a1\u5904\u7406\u6211\u63d0\u4ea4\u7684\u5065\u5eb7\u8bc4\u4f30\u4fe1\u606f\uff0c\u7528\u4e8e\u751f\u6210\u5065\u5eb7\u7ba1\u7406\u5efa\u8bae\u3002\u6211\u7406\u89e3\u8be5\u670d\u52a1\u4e0d\u6784\u6210\u533b\u7597\u8bca\u65ad\u3001\u6cbb\u7597\u6216\u5904\u65b9\u3002"
               : "I agree that GB Medix may use third-party AI services to process the health assessment information I submit in order to generate health management guidance. I understand this service does not provide medical diagnosis, treatment, or prescriptions."}
           </p>
-          <p className="mt-2 text-xs text-ink/55">
-            {lang === "zh" ? "\u5f53\u524d AI Provider" : "Current AI provider"}: {consentStatus?.provider}
-          </p>
-          <label className="mt-4 flex items-start gap-3 text-sm text-ink/75">
+          <label className="mt-4 flex items-start gap-3 rounded-md border border-amber/20 bg-white/45 p-3 text-sm text-ink/75">
             <input
               type="checkbox"
               checked={consentChecked}
@@ -193,6 +248,11 @@ export function TCMCheckForm({
                 : "Agree and continue"}
           </button>
         </section>
+      ) : null}
+      {consentAccepted && consentMessage ? (
+        <p className="rounded-md border border-leaf/20 bg-leaf/10 px-4 py-3 text-sm font-medium text-leaf">
+          {consentMessage}
+        </p>
       ) : null}
       {children}
       <div className="grid gap-4 rounded-md border border-cyan-300/15 bg-cyan-300/[0.03] p-4 lg:grid-cols-[1.05fr_0.95fr]">
@@ -284,13 +344,62 @@ export function TCMCheckForm({
         </div>
       </div>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {submitDisabled && !loading ? (
+        <p className="text-sm text-ink/55">
+          {consentStatusLoading
+            ? lang === "zh"
+              ? "\u6b63\u5728\u68c0\u67e5 AI \u5904\u7406\u540c\u610f\u72b6\u6001..."
+              : "Checking AI processing consent status..."
+            : consentRequired
+              ? lang === "zh"
+                ? "\u8bf7\u5148\u5b8c\u6210\u4e0a\u65b9\u540c\u610f\u786e\u8ba4\u3002"
+                : "Complete the consent step above to enable assessment submission."
+              : ""}
+        </p>
+      ) : null}
       <button
-        disabled={loading || consentRequired}
+        disabled={submitDisabled}
         className="premium-button rounded-md px-5 py-3 font-medium disabled:opacity-60"
       >
-        {loading ? "Analyzing..." : copy[lang].analyze}
+        {loading
+          ? "Analyzing..."
+          : consentRequired
+            ? lang === "zh"
+              ? "\u5148\u540c\u610f\u518d\u5f00\u59cb\u8bc4\u4f30"
+              : "Accept notice to start assessment"
+            : copy[lang].analyze}
       </button>
     </form>
+  );
+}
+
+function FlowStep({
+  active,
+  done,
+  label,
+  title,
+  detail
+}: {
+  active: boolean;
+  done: boolean;
+  label: string;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div
+      className={[
+        "rounded-md border p-3",
+        active ? "border-mint/25 bg-mint/10" : "border-white/10 bg-white/[0.03]"
+      ].join(" ")}
+    >
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mint/70">{label}</p>
+      <p className="mt-1 font-semibold text-ink">{title}</p>
+      <p className="mt-1 flex items-center gap-2 text-xs text-ink/55">
+        <span className={done ? "h-2 w-2 rounded-full bg-leaf" : "h-2 w-2 rounded-full bg-white/25"} />
+        {detail}
+      </p>
+    </div>
   );
 }
 

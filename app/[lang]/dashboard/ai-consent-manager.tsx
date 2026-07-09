@@ -62,20 +62,27 @@ export function AIConsentManager({
         </span>
       </div>
       <div className="mt-4 grid gap-2 text-sm text-ink/70 sm:grid-cols-3">
-        <p>
-          <span className="font-medium text-ink">{lang === "zh" ? "\u9700\u8981\u540c\u610f" : "Required"}:</span>{" "}
-          {status.required ? "yes" : "no"}
-        </p>
-        <p>
-          <span className="font-medium text-ink">{lang === "zh" ? "\u72b6\u6001" : "Status"}:</span>{" "}
-          {status.accepted ? "accepted" : "not accepted"}
-        </p>
-        <p>
-          <span className="font-medium text-ink">Version:</span> {status.consentVersion}
-        </p>
+        <StatusPill
+          label={lang === "zh" ? "\u9700\u8981\u540c\u610f" : "Required"}
+          value={status.required ? "yes" : "no"}
+          active={status.required}
+        />
+        <StatusPill
+          label={lang === "zh" ? "\u72b6\u6001" : "Status"}
+          value={status.accepted ? "accepted" : "not accepted"}
+          active={status.accepted}
+        />
+        <StatusPill label="Version" value={status.consentVersion} active />
       </div>
       {status.acceptedAt ? (
         <p className="mt-3 text-xs text-ink/50">Accepted at: {status.acceptedAt}</p>
+      ) : null}
+      {status.required && status.accepted ? (
+        <p className="mt-4 rounded-md border border-amber/20 bg-amber/10 px-3 py-2 text-sm text-ink/65">
+          {lang === "zh"
+            ? "\u64a4\u56de\u540e\uff0c\u4f7f\u7528\u7b2c\u4e09\u65b9 AI Provider \u65f6\u9700\u8981\u91cd\u65b0\u540c\u610f\u3002"
+            : "After revoking, third-party AI provider features will ask for consent again before processing."}
+        </p>
       ) : null}
       {status.required && status.accepted ? (
         <button
@@ -89,5 +96,25 @@ export function AIConsentManager({
       ) : null}
       {message ? <p className="mt-3 text-sm text-ink/65">{message}</p> : null}
     </section>
+  );
+}
+
+function StatusPill({
+  label,
+  value,
+  active
+}: {
+  label: string;
+  value: string;
+  active: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-white/10 bg-white/[0.04] px-3 py-2">
+      <p className="text-xs uppercase tracking-[0.12em] text-ink/40">{label}</p>
+      <p className="mt-1 flex items-center gap-2 font-medium text-ink">
+        <span className={active ? "h-2 w-2 rounded-full bg-leaf" : "h-2 w-2 rounded-full bg-white/25"} />
+        {value}
+      </p>
+    </div>
   );
 }

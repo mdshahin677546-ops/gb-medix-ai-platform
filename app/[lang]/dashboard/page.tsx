@@ -22,20 +22,20 @@ const zh = {
 
 const fallbackMetrics = [
   {
-    en: ["Health Reports", "AI health assessment", "0", "sign in"]
-    ,zh: ["\u5065\u5eb7\u62a5\u544a", "AI \u5065\u5eb7\u8bc4\u4f30", "0", "\u8bf7\u767b\u5f55"]
+    en: ["Free Assessment", "AI wellness intake", "3 min", "start"]
+    ,zh: ["\u514d\u8d39\u8bc4\u4f30", "AI \u5065\u5eb7\u95ee\u5377", "3 min", "\u7acb\u5373\u5f00\u59cb"]
   },
   {
-    en: ["Premium Reports", "Unlocked reports", "0", "sign in"],
-    zh: ["Premium \u62a5\u544a", "\u5df2\u89e3\u9501\u62a5\u544a", "0", "\u8bf7\u767b\u5f55"]
+    en: ["Free Result", "Basic health insights", "Free", "after intake"],
+    zh: ["\u514d\u8d39\u7ed3\u679c", "\u57fa\u7840\u5065\u5eb7\u6d1e\u5bdf", "Free", "\u8bc4\u4f30\u540e\u67e5\u770b"]
   },
   {
-    en: ["Payments", "Payment records", "0", "sign in"],
-    zh: ["\u652f\u4ed8\u8bb0\u5f55", "\u4ed8\u6b3e\u72b6\u6001", "0", "\u8bf7\u767b\u5f55"]
+    en: ["Premium Report", "Lifestyle guidance", "$9.99", "optional"],
+    zh: ["Premium \u62a5\u544a", "\u751f\u6d3b\u65b9\u5f0f\u5efa\u8bae", "$9.99", "\u53ef\u9009\u5347\u7ea7"]
   },
   {
-    en: ["Next Steps", "Health management", "0", "start free"],
-    zh: ["\u4e0b\u4e00\u6b65", "\u5065\u5eb7\u7ba1\u7406\u5efa\u8bae", "0", "\u514d\u8d39\u5f00\u59cb"]
+    en: ["Consent Gate", "Third-party AI notice", "Ready", "required before AI"],
+    zh: ["AI \u540c\u610f\u95e8", "\u7b2c\u4e09\u65b9 AI \u5904\u7406\u544a\u77e5", "Ready", "AI \u524d\u786e\u8ba4"]
   }
 ];
 
@@ -87,9 +87,26 @@ export default async function DashboardPage({
     : [[], [], []];
 
   const [tcmRecords, assistantSessions, payments] = records;
+  const providerName = getConfiguredAIProviderName();
   const aiConsentStatus = user
-    ? await getAIConsentStatus(user.id, getConfiguredAIProviderName())
+    ? await getAIConsentStatus(user.id, providerName)
     : null;
+  const consentLabel = aiConsentStatus
+    ? aiConsentStatus.required
+      ? aiConsentStatus.accepted
+        ? lang === "zh" ? "\u5df2\u540c\u610f" : "Accepted"
+        : lang === "zh" ? "\u9700\u786e\u8ba4" : "Action needed"
+      : lang === "zh" ? "\u5df2\u51c6\u5907" : "Ready"
+    : user
+      ? lang === "zh" ? "\u68c0\u67e5\u4e2d" : "Checking"
+      : lang === "zh" ? "\u767b\u5f55\u540e\u786e\u8ba4" : "Confirm after sign-in";
+  const reportReadyLabel = tcmRecords.length
+    ? lang === "zh" ? "\u5df2\u6709\u8bc4\u4f30\u6570\u636e" : "Assessment data ready"
+    : lang === "zh" ? "\u5c1a\u672a\u5f00\u59cb\u8bc4\u4f30" : "Assessment not started";
+  const nextActionHref = user ? `/${lang}/tcm-check` : `/${lang}/account`;
+  const nextActionLabel = user
+    ? lang === "zh" ? "\u7ee7\u7eed\u5065\u5eb7\u8bc4\u4f30" : "Continue assessment"
+    : lang === "zh" ? "\u5f00\u59cb\u514d\u8d39 AI \u5065\u5eb7\u8bc4\u4f30" : "Start free AI assessment";
   const metrics = user
     ? [
         {
@@ -116,13 +133,14 @@ export default async function DashboardPage({
   return (
     <Shell lang={lang}>
       <div className="grid gap-5">
-        <section className="glass-panel rounded-md p-5 sm:p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
+        <section className="glass-panel overflow-hidden rounded-md p-5 sm:p-6">
+          <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mint/70">
-                GB Medix Health Center
-              </p>
-              <h1 className="mt-3 text-3xl font-semibold text-ink sm:text-4xl">
+              <div className="inline-flex items-center gap-2 rounded-md border border-mint/20 bg-mint/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-mint">
+                <span className="h-2 w-2 rounded-full bg-mint shadow-[0_0_18px_rgba(99,245,215,0.95)]" />
+                GB Medix Health OS
+              </div>
+              <h1 className="mt-4 max-w-3xl text-3xl font-semibold text-ink sm:text-4xl">
                 {lang === "zh" ? zh.title : "User Health Center"}
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-ink/65">
@@ -130,40 +148,57 @@ export default async function DashboardPage({
                   ? zh.subtitle
                   : "Review your AI health assessments, reports, payments, and next health management steps."}
               </p>
-            </div>
-            <div className="rounded-md border border-mint/20 bg-mint/10 px-4 py-3 text-sm text-mint">
-              {user ? user.email : lang === "zh" ? zh.signedOut : "Signed-out preview"}
-            </div>
-          </div>
 
-          {!user ? (
-            <div className="mt-5 rounded-md border border-amber/25 bg-amber/10 p-4 text-sm text-ink/75">
-              <p className="font-medium text-amber">
-                {lang === "zh" ? zh.signedOut : "Signed-out mode"}
-              </p>
-              <p className="mt-2">
-                {lang === "zh"
-                  ? zh.signedOutCopy
-                  : "Sign in to see your reports, payments, and health management records."}
-              </p>
-              <Link
-                href={`/${lang}/account`}
-                className="mt-4 inline-flex rounded-md border border-mint/25 bg-mint/10 px-4 py-2 font-medium text-mint transition hover:bg-mint/15"
-              >
-                {lang === "zh" ? zh.account : "Go to account"}
-              </Link>
+              {!user ? (
+                <div className="mt-5 rounded-md border border-mint/20 bg-mint/10 p-4 text-sm text-ink/75">
+                  <p className="font-medium text-mint">
+                    {lang === "zh" ? "\u514d\u8d39\u4f53\u9a8c\u5df2\u5c31\u7eea" : "Free assessment is ready"}
+                  </p>
+                  <p className="mt-2">
+                    {lang === "zh"
+                      ? zh.signedOutCopy
+                      : "Sign in to see your reports, payments, and health management records."}
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <Link
+                      href={`/${lang}/account`}
+                      className="premium-button rounded-md px-4 py-2 font-semibold"
+                    >
+                      {nextActionLabel}
+                    </Link>
+                    <Link
+                      href={`/${lang}/account`}
+                      className="rounded-md border border-white/10 bg-white/5 px-4 py-2 font-medium text-ink/70 transition hover:border-mint/30 hover:text-mint"
+                    >
+                      {lang === "zh" ? zh.account : "Go to account"}
+                    </Link>
+                  </div>
+                </div>
+              ) : null}
             </div>
-          ) : null}
+
+            <StatusModule
+              lang={lang}
+              email={user?.email ?? null}
+              providerName={providerName}
+              consentLabel={consentLabel}
+              reportReadyLabel={reportReadyLabel}
+              nextActionHref={nextActionHref}
+              nextActionLabel={nextActionLabel}
+            />
+          </div>
         </section>
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {localizedMetrics.map(([label, sublabel, value, trend]) => (
-            <div key={label} className="metric-tile rounded-md p-5">
-              <p className="text-sm text-ink/55">{label}</p>
-              <p className="mt-1 text-xs text-ink/35">{sublabel}</p>
-              <p className="mt-4 text-4xl font-semibold text-ink">{value}</p>
-              <p className="mt-2 text-xs text-mint">{trend}</p>
-            </div>
+          {localizedMetrics.map(([label, sublabel, value, trend], index) => (
+            <MetricTile
+              key={label}
+              label={label}
+              sublabel={sublabel}
+              value={value}
+              trend={trend}
+              index={index}
+            />
           ))}
         </section>
 
@@ -177,21 +212,16 @@ export default async function DashboardPage({
                 Personal
               </span>
             </div>
-            <div className="grid gap-4">
-              {localizedPipeline.map(([label, progress, detail]) => (
-                <div key={label} className="rounded-md border border-white/10 bg-white/5 p-4">
-                  <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="font-medium text-ink">{label}</span>
-                    <span className="text-mint">{progress}</span>
-                  </div>
-                  <div className="mt-3 h-2 rounded-md bg-white/10">
-                    <div
-                      className="h-2 rounded-md bg-mint"
-                      style={{ width: progress }}
-                    />
-                  </div>
-                  <p className="mt-2 text-xs text-ink/55">{detail}</p>
-                </div>
+            <div className="grid gap-3">
+              {localizedPipeline.map(([label, progress, detail], index) => (
+                <PathStep
+                  key={label}
+                  label={label}
+                  progress={progress}
+                  detail={detail}
+                  index={index}
+                  isActive={user ? index === Math.min(tcmRecords.length ? 2 : 0, 3) : index === 0}
+                />
               ))}
             </div>
           </div>
@@ -241,6 +271,158 @@ export default async function DashboardPage({
         <AIConsentManager lang={lang} initialStatus={aiConsentStatus} />
       </div>
     </Shell>
+  );
+}
+
+function StatusModule({
+  lang,
+  email,
+  providerName,
+  consentLabel,
+  reportReadyLabel,
+  nextActionHref,
+  nextActionLabel
+}: {
+  lang: string;
+  email: string | null;
+  providerName: string;
+  consentLabel: string;
+  reportReadyLabel: string;
+  nextActionHref: string;
+  nextActionLabel: string;
+}) {
+  const rows = [
+    [lang === "zh" ? "AI Provider" : "AI Provider", providerName],
+    [lang === "zh" ? "\u5904\u7406\u540c\u610f" : "Processing consent", consentLabel],
+    [lang === "zh" ? "\u62a5\u544a\u51c6\u5907" : "Report readiness", reportReadyLabel]
+  ];
+
+  return (
+    <aside className="relative overflow-hidden rounded-md border border-cyan-300/15 bg-[#061827]/80 p-4 shadow-[0_0_46px_rgba(25,211,197,0.08)]">
+      <span className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-mint/70 to-transparent" />
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-mint/70">
+            Live Control
+          </p>
+          <p className="mt-2 text-sm font-medium text-ink">
+            {email ?? (lang === "zh" ? "\u8bbf\u5ba2\u9884\u89c8" : "Guest preview")}
+          </p>
+        </div>
+        <span className="grid h-12 w-12 place-items-center rounded-md border border-mint/25 bg-mint/10 text-xs font-semibold text-mint shadow-[0_0_26px_rgba(99,245,215,0.16)]">
+          AI
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {rows.map(([label, value]) => (
+          <div
+            key={label}
+            className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2"
+          >
+            <span className="text-xs text-ink/45">{label}</span>
+            <span className="max-w-[54%] truncate text-right text-xs font-medium text-ink/80">
+              {value}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <Link
+        href={nextActionHref}
+        className="mt-4 flex items-center justify-center rounded-md border border-mint/30 bg-mint/10 px-4 py-3 text-sm font-semibold text-mint transition hover:bg-mint/15"
+      >
+        {nextActionLabel}
+      </Link>
+    </aside>
+  );
+}
+
+function MetricTile({
+  label,
+  sublabel,
+  value,
+  trend,
+  index
+}: {
+  label: string;
+  sublabel: string;
+  value: string;
+  trend: string;
+  index: number;
+}) {
+  const accent = index % 2 === 0 ? "from-mint/80" : "from-cyan-300/70";
+
+  return (
+    <div className="metric-tile relative overflow-hidden rounded-md p-5 transition hover:border-mint/35 hover:bg-mint/[0.04]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-ink/70">{label}</p>
+          <p className="mt-1 text-xs text-ink/35">{sublabel}</p>
+        </div>
+        <span className="mt-1 h-2 w-2 rounded-full bg-mint shadow-[0_0_16px_rgba(99,245,215,0.9)]" />
+      </div>
+      <p className="mt-4 text-4xl font-semibold text-ink">{value}</p>
+      <p className="mt-2 inline-flex rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-mint">
+        {trend}
+      </p>
+      <span
+        className={`absolute inset-x-0 bottom-0 h-px bg-gradient-to-r ${accent} via-sky-300/50 to-transparent`}
+      />
+    </div>
+  );
+}
+
+function PathStep({
+  label,
+  progress,
+  detail,
+  index,
+  isActive
+}: {
+  label: string;
+  progress: string;
+  detail: string;
+  index: number;
+  isActive: boolean;
+}) {
+  return (
+    <div
+      className={
+        isActive
+          ? "rounded-md border border-mint/30 bg-mint/10 p-4 shadow-[0_0_34px_rgba(99,245,215,0.1)]"
+          : "rounded-md border border-white/10 bg-white/[0.04] p-4"
+      }
+    >
+      <div className="flex items-center gap-3">
+        <span
+          className={
+            isActive
+              ? "grid h-8 w-8 shrink-0 place-items-center rounded-md border border-mint/35 bg-mint/15 text-xs font-semibold text-mint"
+              : "grid h-8 w-8 shrink-0 place-items-center rounded-md border border-white/10 bg-white/5 text-xs font-semibold text-ink/45"
+          }
+        >
+          {index + 1}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-medium text-ink">{label}</span>
+            <span className={isActive ? "text-mint" : "text-ink/45"}>{progress}</span>
+          </div>
+          <div className="mt-3 h-2 rounded-md bg-white/10">
+            <div
+              className={
+                isActive
+                  ? "h-2 rounded-md bg-gradient-to-r from-mint to-cyan-300"
+                  : "h-2 rounded-md bg-white/25"
+              }
+              style={{ width: progress }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-ink/55">{detail}</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
