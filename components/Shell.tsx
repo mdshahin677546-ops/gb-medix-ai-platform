@@ -8,30 +8,30 @@ const shellCopy = {
   en: {
     dashboard: "Dashboard",
     assistant: "AI Assistant",
-    consult: "AI Consult",
+    consult: "Health Planning",
     bodyTest: "Body Test",
     shop: "Shop",
     rfq: "Supply Chain",
     merchant: "Merchant",
     account: "Account",
-    console: "Clinical operations console",
+    console: "AI health management",
     status: "System status: Normal",
-    ops: "Clinical AI Ops",
-    search: "Search patients, orders, RFQs, products..."
+    ops: "AI Health Center",
+    search: "Search reports, plans, and wellness products..."
   },
   zh: {
     dashboard: "\u6570\u636e\u770b\u677f",
     assistant: "AI \u52a9\u624b",
-    consult: "AI \u95ee\u8bca",
+    consult: "\u5065\u5eb7\u65b9\u6848",
     bodyTest: "\u8eab\u4f53\u68c0\u6d4b",
     shop: "\u5546\u57ce",
     rfq: "\u4f9b\u5e94\u94fe",
     merchant: "\u5546\u5bb6\u7aef",
     account: "\u8d26\u6237",
-    console: "\u4e34\u5e8a\u8fd0\u8425\u63a7\u5236\u53f0",
+    console: "AI \u5065\u5eb7\u7ba1\u7406",
     status: "\u7cfb\u7edf\u72b6\u6001\uff1a\u6b63\u5e38",
-    ops: "\u4e34\u5e8a AI \u8fd0\u8425",
-    search: "\u641c\u7d22\u60a3\u8005\u3001\u8ba2\u5355\u3001RFQ\u3001\u4ea7\u54c1..."
+    ops: "AI \u5065\u5eb7\u4e2d\u5fc3",
+    search: "\u641c\u7d22\u62a5\u544a\u3001\u65b9\u6848\u548c\u5065\u5eb7\u4ea7\u54c1..."
   }
 };
 
@@ -106,7 +106,6 @@ export function Shell({
                 <span className="rounded-md border border-mint/20 bg-mint/10 px-3 py-2 text-mint">
                   AI Ready
                 </span>
-                <span className="hidden sm:inline">Dr. Zhang</span>
                 <LanguageSwitcher lang={lang} />
               </div>
             </nav>

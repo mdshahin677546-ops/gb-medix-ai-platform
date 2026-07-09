@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { grantEntitlementForPayment } from "@/lib/entitlements";
+import { grantEntitlementForPayment, revokeEntitlement } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(request: Request) {
@@ -29,20 +29,95 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid Stripe signature" }, { status: 400 });
   }
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
-    await prisma.paymentRecord.updateMany({
-      where: { sessionId: session.id },
-      data: { status: session.payment_status || "paid" }
-    });
-    const payment = await prisma.paymentRecord.findUnique({
-      where: { sessionId: session.id }
-    });
-
-    if (payment && (payment.status === "paid" || session.payment_status === "paid")) {
-      await grantEntitlementForPayment(payment.id);
-    }
+  switch (event.type) {
+    case "checkout.session.completed":
+      await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+      break;
+    case "checkout.session.expired":
+      await handleCheckoutExpired(event.data.object as Stripe.Checkout.Session);
+      break;
+    case "payment_intent.payment_failed":
+      await handlePaymentIntentFailed(event.data.object as Stripe.PaymentIntent);
+      break;
+    case "charge.refunded":
+      await handleChargeReversal(event.data.object as Stripe.Charge, "refunded");
+      break;
+    case "charge.dispute.created":
+      await handleDispute(event.data.object as Stripe.Dispute);
+      break;
   }
 
   return NextResponse.json({ received: true });
+}
+
+async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
+  const status = session.payment_status === "paid" ? "paid" : session.payment_status || "unpaid";
+  const payment = await prisma.paymentRecord.update({
+    where: { sessionId: session.id },
+    data: {
+      status,
+      paymentIntentId:
+        typeof session.payment_intent === "string" ? session.payment_intent : null
+    }
+  }).catch(() => null);
+
+  if (payment && status === "paid") {
+    await grantEntitlementForPayment(payment.id);
+  }
+}
+
+async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
+  await prisma.paymentRecord.updateMany({
+    where: { sessionId: session.id, status: { not: "paid" } },
+    data: { status: "expired" }
+  });
+}
+
+async function handlePaymentIntentFailed(intent: Stripe.PaymentIntent) {
+  const payments = await prisma.paymentRecord.updateMany({
+    where: { paymentIntentId: intent.id, status: { not: "paid" } },
+    data: { status: "failed" }
+  });
+
+  if (payments.count === 0) {
+    await prisma.paymentRecord.updateMany({
+      where: { sessionId: intent.metadata?.checkout_session_id, status: { not: "paid" } },
+      data: { status: "failed" }
+    });
+  }
+}
+
+async function handleChargeReversal(charge: Stripe.Charge, status: "refunded" | "disputed") {
+  const paymentIntentId =
+    typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id;
+  if (!paymentIntentId) return;
+
+  const payment = await prisma.paymentRecord.findFirst({
+    where: { paymentIntentId }
+  });
+  if (!payment) return;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.paymentRecord.update({
+      where: { id: payment.id },
+      data: { status }
+    });
+    await tx.entitlement.updateMany({
+      where: { paymentId: payment.id, status: "active" },
+      data: { status: "revoked" }
+    });
+  });
+
+  await revokeEntitlement({ paymentId: payment.id });
+}
+
+async function handleDispute(dispute: Stripe.Dispute) {
+  const paymentIntentId =
+    typeof dispute.payment_intent === "string"
+      ? dispute.payment_intent
+      : dispute.payment_intent?.id;
+  if (!paymentIntentId) return;
+
+  const charge = { payment_intent: paymentIntentId } as Stripe.Charge;
+  await handleChargeReversal(charge, "disputed");
 }

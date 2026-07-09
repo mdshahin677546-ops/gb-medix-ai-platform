@@ -86,6 +86,10 @@ export function TCMCheckForm({
     const data = await response.json();
     sessionStorage.setItem("gbmedix:lastResult", JSON.stringify(data.result));
     sessionStorage.setItem("gbmedix:lastRecordId", data.id);
+    if (data.reportId) {
+      router.push(`/${lang}/report/${data.reportId}`);
+      return;
+    }
     router.push(`/${lang}/tcm-result`);
   }
 

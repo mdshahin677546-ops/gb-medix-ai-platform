@@ -7,10 +7,12 @@ import type { Lang } from "@/lib/lang";
 
 export function ResultView({ lang }: { lang: Lang }) {
   const [result, setResult] = useState<TCMResult>(fallbackResult);
+  const [recordId, setRecordId] = useState("");
 
   useEffect(() => {
     const stored = sessionStorage.getItem("gbmedix:lastResult");
     if (stored) setResult(JSON.parse(stored));
+    setRecordId(sessionStorage.getItem("gbmedix:lastRecordId") || "");
   }, []);
 
   return (
@@ -29,7 +31,7 @@ export function ResultView({ lang }: { lang: Lang }) {
         <h2 className="text-xl font-semibold text-ink">Upgrade CTA</h2>
         <p className="mt-2 text-ink/75">{result.upgradeCta}</p>
         <Link
-          href={`/${lang}/checkout`}
+          href={`/${lang}/checkout${recordId ? `?assessmentId=${recordId}` : ""}`}
           className="mt-4 inline-flex rounded-md bg-leaf px-5 py-3 font-medium text-white hover:bg-ink"
         >
           Unlock Full Plan

@@ -2,37 +2,48 @@ import { prisma } from "@/lib/prisma";
 
 export const PRODUCT_BODY_RESET_PLAN = "body_reset_plan";
 export const PRODUCT_CONSULT_PACK = "consult_pack";
+export const PRODUCT_PREMIUM_REPORT = "premium_report";
+export const RESOURCE_ASSESSMENT = "assessment";
 
-/**
- * Whether the user currently holds an active, unexpired entitlement for a product.
- */
-export async function checkEntitlement(userId: string, productId: string) {
-  const now = new Date();
+type EntitlementScope = {
+  userId: string;
+  productId: string;
+  resourceType?: string | null;
+  resourceId?: string | null;
+};
+
+function scopedWhere(scope: EntitlementScope) {
+  return {
+    userId: scope.userId,
+    productId: scope.productId,
+    status: "active",
+    resourceType: scope.resourceType ?? null,
+    resourceId: scope.resourceId ?? null,
+    OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
+  };
+}
+
+export async function checkEntitlement(
+  scopeOrUserId: EntitlementScope | string,
+  maybeProductId?: string
+) {
+  const scope =
+    typeof scopeOrUserId === "string"
+      ? { userId: scopeOrUserId, productId: maybeProductId || "" }
+      : scopeOrUserId;
+
+  if (!scope.userId || !scope.productId) return false;
+
   const entitlement = await prisma.entitlement.findFirst({
-    where: {
-      userId,
-      productId,
-      status: "active",
-      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
-    }
+    where: scopedWhere(scope)
   });
 
   return Boolean(entitlement);
 }
 
-/**
- * Backward-compatible alias for {@link checkEntitlement}.
- */
 export const hasActiveEntitlement = checkEntitlement;
 
-/**
- * Grant an entitlement tied to a specific payment. The Entitlement model requires
- * a paymentId, so manual (payment-less) grants are intentionally not supported
- * here; that would need a schema change and is out of scope for this refactor.
- */
-export async function grantEntitlement(params: {
-  userId: string;
-  productId: string;
+export async function grantEntitlement(params: EntitlementScope & {
   paymentId: string;
   expiresAt?: Date | null;
 }) {
@@ -45,34 +56,46 @@ export async function grantEntitlement(params: {
     },
     update: {
       status: "active",
+      resourceType: params.resourceType ?? null,
+      resourceId: params.resourceId ?? null,
       expiresAt: params.expiresAt ?? null
     },
     create: {
       userId: params.userId,
       productId: params.productId,
       paymentId: params.paymentId,
+      resourceType: params.resourceType ?? null,
+      resourceId: params.resourceId ?? null,
       status: "active",
       expiresAt: params.expiresAt ?? null
     }
   });
 }
 
-/**
- * Revoke all active entitlements a user holds for a product (e.g. refund/chargeback).
- */
-export async function revokeEntitlement(userId: string, productId: string) {
+export async function revokeEntitlement(
+  scopeOrUserId: (Partial<EntitlementScope> & { paymentId?: string }) | string,
+  maybeProductId?: string
+) {
+  const scope =
+    typeof scopeOrUserId === "string"
+      ? { userId: scopeOrUserId, productId: maybeProductId }
+      : scopeOrUserId;
+
   const result = await prisma.entitlement.updateMany({
-    where: { userId, productId, status: "active" },
+    where: {
+      ...(scope.paymentId ? { paymentId: scope.paymentId } : {}),
+      ...(scope.userId ? { userId: scope.userId } : {}),
+      ...(scope.productId ? { productId: scope.productId } : {}),
+      ...(scope.resourceType !== undefined ? { resourceType: scope.resourceType } : {}),
+      ...(scope.resourceId !== undefined ? { resourceId: scope.resourceId } : {}),
+      status: "active"
+    },
     data: { status: "revoked" }
   });
 
   return result.count;
 }
 
-/**
- * Grant the entitlement implied by a paid payment record. No-op unless the
- * payment exists, is attached to a user, and is marked paid.
- */
 export async function grantEntitlementForPayment(paymentId: string) {
   const payment = await prisma.paymentRecord.findUnique({
     where: { id: paymentId }
@@ -85,6 +108,8 @@ export async function grantEntitlementForPayment(paymentId: string) {
   return grantEntitlement({
     userId: payment.userId,
     productId: payment.product,
-    paymentId: payment.id
+    paymentId: payment.id,
+    resourceType: payment.resourceType,
+    resourceId: payment.resourceId
   });
 }

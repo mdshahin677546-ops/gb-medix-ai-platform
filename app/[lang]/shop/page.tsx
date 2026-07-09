@@ -31,7 +31,7 @@ const defaultProducts: ShopProduct[] = [
       "Compact sleep-support pack with calming routine prompts and nighttime support."
   },
   {
-    name: "Clinical Wellness Kit",
+    name: "Wellness Support Kit",
     zhName: "家庭健康套组",
     image: "/assets/shop/clinical-wellness-kit.png",
     tag: "Family profile",

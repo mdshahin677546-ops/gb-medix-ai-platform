@@ -12,7 +12,8 @@ import {
   fallbackStructuredReport,
   ReportSchema,
   reportJsonInstruction,
-  structuredReportToTCMResult
+  structuredReportToTCMResult,
+  toFreeReportPayload
 } from "@/lib/report-schema";
 
 const inputSchema = z.object({
@@ -131,20 +132,22 @@ Extra notes: ${input.extraNotes}`
       result: JSON.stringify(result)
     }
   });
-  await prisma.aIReport.create({
+  const freeReport = toFreeReportPayload(report);
+  const savedReport = await prisma.aIReport.create({
     data: {
       userId: user.id,
       assessmentId: record.id,
-      type: "tcm_assessment",
-      status: "completed",
+      type: "free_health_report",
+      status: "free_ready",
       score: report.healthScore,
       summary: report.summary,
-      analysis: report,
-      recommendations: report.recommendations,
-      lifestylePlan: report.lifestylePlan,
-      productSuggestions: report.productSuggestions
+      analysis: freeReport,
+      recommendations: freeReport.limitedRecommendations,
+      lifestylePlan: [],
+      productSuggestions: [],
+      followUpPlan: []
     }
   });
 
-  return NextResponse.json({ id: record.id, result });
+  return NextResponse.json({ id: record.id, reportId: savedReport.id, result });
 }

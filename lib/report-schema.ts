@@ -6,6 +6,13 @@ export const RecommendationSchema = z.object({
   content: z.string().min(1)
 });
 
+export const ProductSuggestionSchema = z.object({
+  category: z.string().min(1),
+  title: z.string().min(1),
+  reason: z.string().min(1),
+  score: z.number().int().min(0).max(100).default(70)
+});
+
 export const ReportSchema = z.object({
   healthScore: z.number().int().min(0).max(100),
   constitution: z.string().min(1),
@@ -13,7 +20,8 @@ export const ReportSchema = z.object({
   summary: z.string().min(1),
   recommendations: z.array(RecommendationSchema).min(1),
   lifestylePlan: z.array(z.string().min(1)).min(1),
-  productSuggestions: z.array(z.string().min(1)).default([])
+  productSuggestions: z.array(ProductSuggestionSchema).default([]),
+  followUpPlan: z.array(z.string().min(1)).default([])
 });
 
 export type StructuredReport = z.infer<typeof ReportSchema>;
@@ -52,7 +60,25 @@ export function fallbackStructuredReport(): StructuredReport {
       content
     })),
     lifestylePlan: fallbackResult.sevenDayPlanPreview,
-    productSuggestions: []
+    productSuggestions: [],
+    followUpPlan: [
+      "Recheck your sleep, energy, digestion, and stress pattern in 7 days.",
+      "Save notes on what changed after trying the lifestyle guidance."
+    ]
+  };
+}
+
+export function toFreeReportPayload(report: StructuredReport) {
+  return {
+    healthScore: report.healthScore,
+    constitution: report.constitution,
+    riskLevel: report.riskLevel,
+    summary: report.summary,
+    basicInsights: [
+      report.summary,
+      `Current wellness pattern: ${report.constitution}`
+    ],
+    limitedRecommendations: report.recommendations.slice(0, 3)
   };
 }
 
@@ -68,6 +94,7 @@ export function reportJsonInstruction() {
   "summary": "wellness summary, not diagnosis",
   "recommendations": [{"category": "sleep|diet|stress|activity|general", "content": "wellness recommendation"}],
   "lifestylePlan": ["day-by-day or step-by-step lifestyle action"],
-  "productSuggestions": ["general wellness product category, not prescription"]
+  "productSuggestions": [{"category": "sleep|nutrition|stress|activity|general", "title": "general wellness product category", "reason": "why it may support the plan", "score": number from 0 to 100}],
+  "followUpPlan": ["non-clinical follow-up action"]
 }`;
 }

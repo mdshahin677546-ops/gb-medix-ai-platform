@@ -3,7 +3,15 @@
 import { useState } from "react";
 import type { Lang } from "@/lib/lang";
 
-export function CheckoutButton({ lang }: { lang: Lang }) {
+export function CheckoutButton({
+  lang,
+  assessmentId,
+  product = "premium_report"
+}: {
+  lang: Lang;
+  assessmentId?: string;
+  product?: "premium_report" | "body_reset_plan" | "consult_pack";
+}) {
   const [loading, setLoading] = useState(false);
   const [provider, setProvider] = useState<"stripe" | "alipay">("stripe");
   const [email, setEmail] = useState("");
@@ -19,7 +27,7 @@ export function CheckoutButton({ lang }: { lang: Lang }) {
     const response = await fetch("/api/checkout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lang, provider, email })
+      body: JSON.stringify({ lang, provider, email, product, assessmentId })
     });
     const data = await response.json();
     if (!response.ok || !data.url) {
@@ -69,7 +77,7 @@ export function CheckoutButton({ lang }: { lang: Lang }) {
         disabled={loading}
         className="rounded-md bg-clay px-5 py-3 font-medium text-white hover:bg-ink disabled:opacity-60"
       >
-        {loading ? "Opening checkout..." : "Continue to Checkout"}
+        {loading ? "Opening checkout..." : "Continue to Stripe Checkout"}
       </button>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
     </div>

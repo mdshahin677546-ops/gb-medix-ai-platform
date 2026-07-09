@@ -23,11 +23,20 @@ export function estimateCost(model: string, tokens: number) {
 }
 
 export function clientIp(request: Request) {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
+  if (process.env.TRUST_PROXY_HEADERS !== "true") {
+    return "direct";
+  }
+
+  const platformHeader =
+    request.headers.get(process.env.TRUST_PROXY_IP_HEADER || "x-real-ip") ||
+    request.headers.get("cf-connecting-ip") ||
+    request.headers.get("x-vercel-forwarded-for");
+
+  if (platformHeader) {
+    return platformHeader.split(",")[0]?.trim() || "unknown";
+  }
+
+  return "unknown";
 }
 
 export async function enforceAIUsageBudget({
@@ -49,34 +58,41 @@ export async function enforceAIUsageBudget({
   }
 
   const ip = clientIp(request);
+  const enforceIpLimit = ip !== "direct" && ip !== "unknown";
   const now = Date.now();
   const windowStart = new Date(now - ipWindowMs);
   const dayStart = new Date();
   dayStart.setUTCHours(0, 0, 0, 0);
 
-  // In-process burst guard: catches rapid concurrent floods within a single
-  // instance before any usage row is written. Not authoritative on its own.
-  const hit = ipHits.get(ip);
-  if (!hit || hit.resetAt <= now) {
-    ipHits.set(ip, { count: 1, resetAt: now + ipWindowMs });
-  } else {
-    hit.count += 1;
-    if (hit.count > ipHourlyLimit) {
-      return NextResponse.json(
-        { error: "Too many AI requests from this IP. Please try again later." },
-        { status: 429 }
-      );
+  if (enforceIpLimit) {
+    // In-process burst guard: catches rapid concurrent floods within a single
+    // instance before any usage row is written. Not authoritative on its own.
+    const hit = ipHits.get(ip);
+    if (!hit || hit.resetAt <= now) {
+      ipHits.set(ip, { count: 1, resetAt: now + ipWindowMs });
+    } else {
+      hit.count += 1;
+      if (hit.count > ipHourlyLimit) {
+        return NextResponse.json(
+          { error: "Too many AI requests from this IP. Please try again later." },
+          { status: 429 }
+        );
+      }
     }
   }
 
   const [ipHourlyCalls, ipTokenSum, userCalls, userTokenSum] = await Promise.all([
-    prisma.aIUsage.count({
-      where: { ip, createdAt: { gte: windowStart } }
-    }),
-    prisma.aIUsage.aggregate({
-      where: { ip, createdAt: { gte: dayStart } },
-      _sum: { tokens: true }
-    }),
+    enforceIpLimit
+      ? prisma.aIUsage.count({
+          where: { ip, createdAt: { gte: windowStart } }
+        })
+      : Promise.resolve(0),
+    enforceIpLimit
+      ? prisma.aIUsage.aggregate({
+          where: { ip, createdAt: { gte: dayStart } },
+          _sum: { tokens: true }
+        })
+      : Promise.resolve({ _sum: { tokens: 0 } }),
     prisma.aIUsage.count({
       where: { userId, model, createdAt: { gte: dayStart } }
     }),
@@ -88,7 +104,7 @@ export async function enforceAIUsageBudget({
 
   // Persistent, cross-instance IP limits. These hold even when an attacker
   // registers many unverified accounts, because they are keyed on IP.
-  if (ipHourlyCalls >= ipHourlyLimit) {
+  if (enforceIpLimit && ipHourlyCalls >= ipHourlyLimit) {
     return NextResponse.json(
       { error: "Too many AI requests from this IP. Please try again later." },
       { status: 429 }
@@ -96,7 +112,7 @@ export async function enforceAIUsageBudget({
   }
 
   const ipUsedTokens = ipTokenSum._sum.tokens || 0;
-  if (ipUsedTokens + estimatedTokens > ipDailyTokenLimit) {
+  if (enforceIpLimit && ipUsedTokens + estimatedTokens > ipDailyTokenLimit) {
     return NextResponse.json(
       { error: "Daily AI token budget for this network is reached." },
       { status: 429 }

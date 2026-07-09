@@ -22,6 +22,7 @@ model User {
   aiUsages          AIUsage[]
   conversations     Conversation[]
   aiReports         AIReport[]
+  productRecommendations ProductRecommendation[]
   patientConsents   PatientConsent[]
   emailVerifications EmailVerification[]
 
@@ -52,6 +53,7 @@ model Product {
   status      String   @default("active")
   createdAt   DateTime @default(now())
   merchant    Merchant @relation(fields: [merchantId], references: [id])
+  recommendations ProductRecommendation[]
 
   @@index([merchantId])
   @@index([status])
@@ -78,6 +80,9 @@ model PaymentRecord {
   provider    String   @default("stripe")
   product     String   @default("body_reset_plan")
   sessionId   String?  @unique
+  paymentIntentId String?
+  resourceType String?
+  resourceId   String?
   status      String
   amountCents Int      @default(999)
   currency    String   @default("usd")
@@ -87,6 +92,8 @@ model PaymentRecord {
 
   @@index([userId])
   @@index([product])
+  @@index([paymentIntentId])
+  @@index([resourceType, resourceId])
   @@index([status])
   @@index([createdAt])
 }
@@ -160,6 +167,8 @@ model Entitlement {
   userId    String
   productId String
   paymentId String
+  resourceType String?
+  resourceId   String?
   status    String    @default("active")
   expiresAt DateTime?
   createdAt DateTime  @default(now())
@@ -169,6 +178,7 @@ model Entitlement {
   @@unique([paymentId, productId])
   @@index([userId])
   @@index([productId])
+  @@index([resourceType, resourceId])
   @@index([status])
   @@index([expiresAt])
 }
@@ -254,19 +264,44 @@ model AIReport {
   status             String    @default("completed")
   score              Int
   summary            String
-  analysis           Json
-  recommendations    Json
-  lifestylePlan      Json
-  productSuggestions Json
+  analysis           Json      @db.JsonB
+  recommendations    Json      @db.JsonB
+  lifestylePlan      Json      @db.JsonB
+  productSuggestions Json      @db.JsonB
+  followUpPlan       Json      @db.JsonB
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   user               User      @relation(fields: [userId], references: [id])
   assessment         TCMRecord? @relation(fields: [assessmentId], references: [id])
+  productRecommendations ProductRecommendation[]
 
+  @@unique([userId, assessmentId, type])
   @@index([userId])
   @@index([assessmentId])
   @@index([type])
   @@index([status])
+  @@index([score])
+  @@index([createdAt])
+}
+
+model ProductRecommendation {
+  id        String   @id @default(cuid())
+  userId    String
+  reportId  String
+  productId String?
+  category  String
+  title     String
+  reason    String
+  score     Int      @default(0)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  report    AIReport @relation(fields: [reportId], references: [id])
+  product   Product? @relation(fields: [productId], references: [id])
+
+  @@index([userId])
+  @@index([reportId])
+  @@index([productId])
+  @@index([category])
   @@index([score])
   @@index([createdAt])
 }
