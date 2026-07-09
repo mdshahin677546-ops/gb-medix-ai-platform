@@ -43,6 +43,9 @@ Required production variables:
 - `OPENAI_API_KEY`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
+- `EMAIL_PROVIDER=resend`
+- `RESEND_API_KEY`
+- `EMAIL_FROM`
 
 Recommended production variables:
 
@@ -53,8 +56,6 @@ Recommended production variables:
 Optional or provider-specific variables:
 
 - `ALIPAY_CHECKOUT_URL`
-- `EMAIL_PROVIDER`
-- `RESEND_API_KEY`
 - `AWS_SES_REGION`
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
@@ -129,11 +130,17 @@ See `STRIPE_PRODUCTION_SETUP.md`.
 Current implementation:
 
 - `EmailProvider` abstraction exists.
-- `ConsoleEmailProvider` is currently the active provider.
+- `ResendEmailProvider` is available for production.
+- `ConsoleEmailProvider` is allowed only outside production.
 
 Production requirement:
 
-- Bind a real provider before relying on email verification.
+- Set `EMAIL_PROVIDER=resend`.
+- Set `RESEND_API_KEY`.
+- Set `EMAIL_FROM` to a verified Resend sender.
+- Configure DNS/SPF/DKIM in Resend.
+- Send a test verification email.
+- Click the verification link and confirm user status changes to `active`.
 
 See `EMAIL_PROVIDER_SETUP.md`.
 
@@ -165,6 +172,8 @@ Go criteria:
 No-go criteria:
 
 - Missing `AUTH_SECRET`, `DATABASE_URL`, or Stripe webhook secret.
+- Missing `EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, or `EMAIL_FROM`.
+- Resend sender domain is not verified.
 - Migration duplicate conflict unresolved.
 - Stripe webhook delivery failing.
-- Email verification required for launch but real email provider not bound.
+- Email verification flow does not activate a test user.

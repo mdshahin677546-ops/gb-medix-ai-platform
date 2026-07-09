@@ -1,17 +1,21 @@
+import { ResendEmailProvider } from "@/lib/email/providers/resend";
+
 export type EmailMessage = {
   to: string;
   subject: string;
   text: string;
+  html?: string;
 };
 
 export interface EmailProvider {
   send(message: EmailMessage): Promise<void>;
 }
 
+const productionEmailError = "Email provider is not configured for production.";
+
 /**
- * Development provider: logs the email instead of sending it. Never use in
- * production — a real provider (Resend, SES, SendGrid, ...) must be bound
- * before verification emails are relied upon.
+ * Development provider: logs the email instead of sending it. Production must
+ * use a real provider because verification gates AI assessment access.
  */
 export class ConsoleEmailProvider implements EmailProvider {
   async send(message: EmailMessage): Promise<void> {
@@ -21,13 +25,16 @@ export class ConsoleEmailProvider implements EmailProvider {
   }
 }
 
-let cached: EmailProvider | null = null;
-
-/**
- * Returns the active email provider. Only the console provider exists so far;
- * production provider selection (via env) is a later step.
- */
 export function getEmailProvider(): EmailProvider {
-  cached ??= new ConsoleEmailProvider();
-  return cached;
+  const provider = (process.env.EMAIL_PROVIDER || "console").toLowerCase();
+
+  if (provider === "resend") {
+    return new ResendEmailProvider();
+  }
+
+  if (provider === "console" && process.env.NODE_ENV !== "production") {
+    return new ConsoleEmailProvider();
+  }
+
+  throw new Error(productionEmailError);
 }

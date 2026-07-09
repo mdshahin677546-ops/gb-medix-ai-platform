@@ -90,11 +90,14 @@ npm start
 ### Email
 
 - `EMAIL_PROVIDER`
-  - Provider selector for future email provider binding.
-  - Current code defaults to console provider.
+  - Set to `resend` in production.
+  - `console` is allowed only outside production.
 
 - `RESEND_API_KEY`
-  - Resend API key if using Resend.
+  - Resend production API key.
+
+- `EMAIL_FROM`
+  - Verified Resend sender, for example `GB Medix AI <verify@your-domain.example>`.
 
 - `AWS_SES_REGION`
   - AWS SES region if using SES.
@@ -222,9 +225,11 @@ Run this after production deploy and migration.
 
 2. Email verification
    - Trigger verification email.
-   - Verify token.
+   - Confirm Resend delivers the email.
+   - Click the verification link:
+     - `${NEXT_PUBLIC_APP_URL}/api/auth/verify-email?token=xxx`
    - Confirm user status becomes `active`.
-   - If real email provider is not bound, use the approved manual/private-launch process.
+   - Confirm user receives a signed-in session.
 
 3. AI assessment
    - Open `/en/tcm-check`.
@@ -337,6 +342,10 @@ Before opening production traffic:
 - Production build passed.
 - PostgreSQL migration deployed.
 - Stripe webhook verified.
+- Resend API key configured.
+- `EMAIL_FROM` sender/domain verified.
+- Test verification email delivered.
+- Test user becomes `active` after clicking email link.
 - First user test flow passed.
 - Email provider decision accepted.
 - Monitoring plan active.

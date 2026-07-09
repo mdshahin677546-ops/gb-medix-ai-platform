@@ -4,15 +4,22 @@
 
 The codebase has an `EmailProvider` interface in `lib/email/provider.ts`.
 
-Current active provider:
+Production provider:
+
+- `ResendEmailProvider`
+- Selected with `EMAIL_PROVIDER=resend`.
+- Uses `RESEND_API_KEY` and `EMAIL_FROM`.
+- Sends a clickable verification link:
+
+```text
+${NEXT_PUBLIC_APP_URL}/api/auth/verify-email?token=xxx
+```
+
+Development provider:
 
 - `ConsoleEmailProvider`
-- Logs messages instead of sending real email.
-
-Production warning:
-
-- Do not rely on email verification in production until a real provider is bound.
-- The `.env.example` email variables are reserved for provider binding.
+- Allowed only when `NODE_ENV !== production`.
+- Production fallback to console throws: `Email provider is not configured for production.`
 
 ## 2. Provider Interface
 
@@ -23,6 +30,7 @@ export type EmailMessage = {
   to: string;
   subject: string;
   text: string;
+  html?: string;
 };
 
 export interface EmailProvider {
@@ -39,6 +47,8 @@ Recommended variables:
 ```env
 EMAIL_PROVIDER="resend"
 RESEND_API_KEY="re_..."
+EMAIL_FROM="GB Medix AI <verify@your-domain.example>"
+NEXT_PUBLIC_APP_URL="https://your-production-domain.example"
 ```
 
 Setup steps:
@@ -47,9 +57,14 @@ Setup steps:
 2. Verify sending domain.
 3. Configure SPF, DKIM, and DMARC.
 4. Create production API key.
-5. Implement `ResendEmailProvider`.
-6. Send test verification email.
-7. Monitor bounces and delivery.
+5. Set `EMAIL_PROVIDER=resend`.
+6. Set `RESEND_API_KEY`.
+7. Set `EMAIL_FROM` to a verified sender.
+8. Set `NEXT_PUBLIC_APP_URL` to the production origin.
+9. Send test verification email.
+10. Click the verification link.
+11. Confirm the user status becomes `active`.
+12. Monitor bounces and delivery.
 
 Best use:
 
@@ -106,26 +121,25 @@ Best use:
 - Teams already using SendGrid.
 - Marketing/transactional separation in one provider.
 
-## 6. Interface Switching Plan
+## 6. Interface Switching
 
-Future implementation should update `getEmailProvider()` to select by env:
+`getEmailProvider()` selects by env:
 
 ```ts
 switch (process.env.EMAIL_PROVIDER) {
   case "resend":
     return new ResendEmailProvider();
-  case "ses":
-    return new SesEmailProvider();
-  case "sendgrid":
-    return new SendGridEmailProvider();
-  default:
+  case "console":
     return new ConsoleEmailProvider();
+  default:
+    throw new Error("Email provider is not configured for production.");
 }
 ```
 
-Production guard recommendation:
+Production guard:
 
-- In `NODE_ENV=production`, fail startup or email-send attempts if `EMAIL_PROVIDER=console`.
+- `EMAIL_PROVIDER=console` is allowed only outside production.
+- Production without `EMAIL_PROVIDER=resend` fails at email-send time.
 
 ## 7. Verification Test Plan
 
@@ -134,15 +148,16 @@ Before production:
 1. Register a new user.
 2. Trigger `/api/auth/send-verification`.
 3. Confirm email arrives.
-4. Use verification token through `/api/auth/verify-email`.
+4. Click the verification link.
 5. Confirm user status changes from `pending` to `active`.
 6. Confirm expired token fails.
 7. Confirm rate limit prevents repeated spam.
 
 ## 8. Known Risk
 
-Email provider binding is not implemented in Sprint 1B. Production can launch only if one of these is true:
+Production email depends on Resend account and DNS readiness:
 
-- Email verification is not required for the initial private launch.
-- Operators manually verify users.
-- A real provider adapter is implemented and reviewed before launch.
+- Domain must be verified before launch.
+- SPF/DKIM records must propagate.
+- `EMAIL_FROM` must use a verified sender/domain.
+- Resend API limits and bounce handling should be monitored.

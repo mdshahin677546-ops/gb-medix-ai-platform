@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { clientIp } from "@/lib/ai-security";
 import { getEmailProvider } from "@/lib/email/provider";
+import { buildVerificationEmail } from "@/lib/email/verification";
 import { prisma } from "@/lib/prisma";
 
 const requestSchema = z.object({
@@ -60,10 +61,12 @@ export async function POST(request: Request) {
     data: { userId: user.id, email, token, expiresAt }
   });
 
+  const emailMessage = buildVerificationEmail({ token });
   await getEmailProvider().send({
     to: email,
-    subject: "Verify your GB Medix email",
-    text: `Use this verification token: ${token}`
+    subject: emailMessage.subject,
+    text: emailMessage.text,
+    html: emailMessage.html
   });
 
   // No session is issued here. A session is granted only after the token is
