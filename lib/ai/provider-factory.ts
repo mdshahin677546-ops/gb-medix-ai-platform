@@ -11,7 +11,7 @@ const defaultDeepSeekBaseURL = "https://api.deepseek.com";
 const defaultDeepSeekModel = "deepseek-chat";
 
 export function getAIProvider(env: NodeJS.ProcessEnv = process.env): AIProvider {
-  const provider = normalizeProvider(env.AI_PROVIDER || "openai");
+  const provider = getConfiguredAIProviderName(env);
 
   if (provider === "openai") {
     const apiKey = env.OPENAI_API_KEY;
@@ -45,6 +45,10 @@ export function getAIProvider(env: NodeJS.ProcessEnv = process.env): AIProvider 
   }
 
   throw new AIProviderConfigError(`AI provider "${provider}" is reserved but not implemented.`);
+}
+
+export function getConfiguredAIProviderName(env: NodeJS.ProcessEnv = process.env): AIProviderName {
+  return normalizeProvider(env.AI_PROVIDER || "openai");
 }
 
 export function normalizeProvider(value: string): AIProviderName {

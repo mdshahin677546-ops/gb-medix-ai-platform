@@ -30,6 +30,21 @@ Minimum consent requirements:
 
 The current implementation adds the adapter and tests only. It does not enable DeepSeek by default.
 
+## Required Consent Gate Checklist Before DeepSeek Production
+
+Before setting `AI_PROVIDER=deepseek` in production, confirm:
+
+- `AIProcessingConsent` migration has been deployed with `prisma migrate deploy`.
+- `/api/ai-consent/status` returns provider, required, accepted, and consentVersion.
+- `/api/ai-consent/accept` records active consent for the current user and current provider.
+- `/api/ai-consent/revoke` sets `revokedAt` without deleting history.
+- `/[lang]/tcm-check` lets users actively accept the third-party AI processing notice.
+- `/[lang]/dashboard` lets users view and revoke current provider consent.
+- `openai` remains ungated in v1.
+- `deepseek`, `qwen`, `kimi`, `glm`, and `doubao` require consent before AI calls.
+- Privacy notice has been published or linked from the production flow.
+- `npm run test:ai-consent` passes.
+
 ## OpenAI Configuration
 
 Production variables:

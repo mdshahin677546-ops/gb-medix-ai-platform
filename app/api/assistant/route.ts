@@ -6,8 +6,16 @@ import {
   estimateTokens,
   recordAIUsage
 } from "@/lib/ai-security";
-import { getAIProvider, getSafeAIError } from "@/lib/ai/provider-factory";
+import {
+  getAIProvider,
+  getConfiguredAIProviderName,
+  getSafeAIError
+} from "@/lib/ai/provider-factory";
 import { buildAssistantSystemPrompt } from "@/lib/ai/prompts";
+import {
+  ensureAIConsentForProvider,
+  isAIConsentRequiredError
+} from "@/lib/ai-consent/consent-service";
 import { prisma } from "@/lib/prisma";
 
 const messageSchema = z.object({
@@ -65,6 +73,24 @@ export async function POST(request: Request) {
       { error: "Please verify your email before using AI." },
       { status: 403 }
     );
+  }
+
+  try {
+    const providerName = getConfiguredAIProviderName();
+    await ensureAIConsentForProvider(user.id, providerName);
+  } catch (error) {
+    if (isAIConsentRequiredError(error)) {
+      return NextResponse.json(
+        {
+          error: "AI_CONSENT_REQUIRED",
+          message:
+            "Please review and accept the third-party AI processing notice before using AI health features."
+        },
+        { status: 403 }
+      );
+    }
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
   }
 
   let provider;

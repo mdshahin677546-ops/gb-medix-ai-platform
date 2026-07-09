@@ -11,9 +11,17 @@ import {
   RESOURCE_ASSESSMENT,
   checkEntitlement
 } from "@/lib/entitlements";
-import { getAIProvider, getSafeAIError } from "@/lib/ai/provider-factory";
+import {
+  getAIProvider,
+  getConfiguredAIProviderName,
+  getSafeAIError
+} from "@/lib/ai/provider-factory";
 import { buildReportSystemPrompt } from "@/lib/ai/prompts";
 import { buildMinimalHealthPayload } from "@/lib/ai/sanitize";
+import {
+  ensureAIConsentForProvider,
+  isAIConsentRequiredError
+} from "@/lib/ai-consent/consent-service";
 import {
   fallbackStructuredReport,
   ReportSchema,
@@ -82,6 +90,24 @@ export async function POST(request: Request) {
         { status: 402 }
       );
     }
+  }
+
+  try {
+    const providerName = getConfiguredAIProviderName();
+    await ensureAIConsentForProvider(user.id, providerName);
+  } catch (error) {
+    if (isAIConsentRequiredError(error)) {
+      return NextResponse.json(
+        {
+          error: "AI_CONSENT_REQUIRED",
+          message:
+            "Please review and accept the third-party AI processing notice before using AI health features."
+        },
+        { status: 403 }
+      );
+    }
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
   }
 
   let provider;

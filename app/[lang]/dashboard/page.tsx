@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { Shell } from "@/components/Shell";
 import { getCurrentUser } from "@/lib/auth";
+import { getConfiguredAIProviderName } from "@/lib/ai/provider-factory";
+import { getAIConsentStatus } from "@/lib/ai-consent/consent-service";
 import { getLang } from "@/lib/lang";
 import { prisma } from "@/lib/prisma";
+import { AIConsentManager } from "./ai-consent-manager";
 
 const zh = {
   title: "\u7528\u6237\u5065\u5eb7\u4e2d\u5fc3",
@@ -84,6 +87,9 @@ export default async function DashboardPage({
     : [[], [], []];
 
   const [tcmRecords, assistantSessions, payments] = records;
+  const aiConsentStatus = user
+    ? await getAIConsentStatus(user.id, getConfiguredAIProviderName())
+    : null;
   const metrics = user
     ? [
         {
@@ -231,6 +237,8 @@ export default async function DashboardPage({
             </Link>
           ))}
         </section>
+
+        <AIConsentManager lang={lang} initialStatus={aiConsentStatus} />
       </div>
     </Shell>
   );

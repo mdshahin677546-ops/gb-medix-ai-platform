@@ -6,9 +6,17 @@ import {
   estimateTokens,
   recordAIUsage
 } from "@/lib/ai-security";
-import { getAIProvider, getSafeAIError } from "@/lib/ai/provider-factory";
+import {
+  getAIProvider,
+  getConfiguredAIProviderName,
+  getSafeAIError
+} from "@/lib/ai/provider-factory";
 import { buildHealthAssessmentSystemPrompt } from "@/lib/ai/prompts";
 import { buildMinimalHealthPayload } from "@/lib/ai/sanitize";
+import {
+  ensureAIConsentForProvider,
+  isAIConsentRequiredError
+} from "@/lib/ai-consent/consent-service";
 import { prisma } from "@/lib/prisma";
 import {
   fallbackStructuredReport,
@@ -49,6 +57,24 @@ export async function POST(request: Request) {
   }
 
   const input = parsed.data;
+  try {
+    const providerName = getConfiguredAIProviderName();
+    await ensureAIConsentForProvider(user.id, providerName);
+  } catch (error) {
+    if (isAIConsentRequiredError(error)) {
+      return NextResponse.json(
+        {
+          error: "AI_CONSENT_REQUIRED",
+          message:
+            "Please review and accept the third-party AI processing notice before using AI health features."
+        },
+        { status: 403 }
+      );
+    }
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
+  }
+
   let provider;
   try {
     provider = getAIProvider();

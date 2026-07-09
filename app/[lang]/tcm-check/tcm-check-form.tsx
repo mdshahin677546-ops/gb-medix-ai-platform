@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { copy, type Lang } from "@/lib/lang";
 
 type UploadAsset = {
@@ -9,6 +9,13 @@ type UploadAsset = {
   type: string;
   size: number;
   preview: string;
+};
+
+type ConsentStatus = {
+  provider: string;
+  required: boolean;
+  accepted: boolean;
+  consentVersion: string;
 };
 
 export function TCMCheckForm({
@@ -23,7 +30,40 @@ export function TCMCheckForm({
   const [error, setError] = useState("");
   const [asset, setAsset] = useState<UploadAsset | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [consentStatus, setConsentStatus] = useState<ConsentStatus | null>(null);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [consentLoading, setConsentLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch("/api/ai-consent/status")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data) setConsentStatus(data);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const consentRequired = Boolean(consentStatus?.required && !consentStatus.accepted);
+
+  async function acceptConsent() {
+    setConsentLoading(true);
+    setError("");
+    const response = await fetch("/api/ai-consent/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accepted: true })
+    });
+    const data = await response.json().catch(() => ({}));
+    setConsentLoading(false);
+
+    if (!response.ok) {
+      setError(data.error || "AI processing consent could not be saved.");
+      return;
+    }
+
+    setConsentStatus(data);
+  }
 
   function setUpload(file?: File) {
     if (!file) {
@@ -50,6 +90,15 @@ export function TCMCheckForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (consentRequired) {
+      setError(
+        lang === "zh"
+          ? "\u8bf7\u5148\u786e\u8ba4\u7b2c\u4e09\u65b9 AI \u5904\u7406\u544a\u77e5\u540e\u518d\u5f00\u59cb\u5065\u5eb7\u8bc4\u4f30\u3002"
+          : "Please review and accept the third-party AI processing notice before starting the assessment."
+      );
+      return;
+    }
+
     setLoading(true);
     setError("");
 
@@ -77,13 +126,18 @@ export function TCMCheckForm({
       body: JSON.stringify({ ...payload, lang })
     });
 
+    const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      setError("Analysis could not be completed. Please try again.");
+      if (data.error === "AI_CONSENT_REQUIRED") {
+        setConsentStatus((current) =>
+          current ? { ...current, required: true, accepted: false } : current
+        );
+      }
+      setError(data.message || data.error || "Analysis could not be completed. Please try again.");
       setLoading(false);
       return;
     }
 
-    const data = await response.json();
     sessionStorage.setItem("gbmedix:lastResult", JSON.stringify(data.result));
     sessionStorage.setItem("gbmedix:lastRecordId", data.id);
     if (data.reportId) {
@@ -98,6 +152,48 @@ export function TCMCheckForm({
       onSubmit={onSubmit}
       className="glass-panel grid max-w-5xl gap-5 overflow-hidden rounded-md p-5 shadow-sm"
     >
+      {consentRequired ? (
+        <section className="rounded-md border border-amber/30 bg-amber/10 p-4 text-sm text-ink">
+          <p className="font-semibold text-amber">
+            {lang === "zh" ? "\u7b2c\u4e09\u65b9 AI \u5904\u7406\u544a\u77e5" : "Third-party AI processing notice"}
+          </p>
+          <p className="mt-2 leading-6 text-ink/75">
+            {lang === "zh"
+              ? "\u6211\u540c\u610f GB Medix \u4f7f\u7528\u7b2c\u4e09\u65b9 AI \u670d\u52a1\u5904\u7406\u6211\u63d0\u4ea4\u7684\u5065\u5eb7\u8bc4\u4f30\u4fe1\u606f\uff0c\u7528\u4e8e\u751f\u6210\u5065\u5eb7\u7ba1\u7406\u5efa\u8bae\u3002\u6211\u7406\u89e3\u8be5\u670d\u52a1\u4e0d\u6784\u6210\u533b\u7597\u8bca\u65ad\u3001\u6cbb\u7597\u6216\u5904\u65b9\u3002"
+              : "I agree that GB Medix may use third-party AI services to process the health assessment information I submit in order to generate health management guidance. I understand this service does not provide medical diagnosis, treatment, or prescriptions."}
+          </p>
+          <p className="mt-2 text-xs text-ink/55">
+            {lang === "zh" ? "\u5f53\u524d AI Provider" : "Current AI provider"}: {consentStatus?.provider}
+          </p>
+          <label className="mt-4 flex items-start gap-3 text-sm text-ink/75">
+            <input
+              type="checkbox"
+              checked={consentChecked}
+              onChange={(event) => setConsentChecked(event.currentTarget.checked)}
+              className="mt-1 accent-leaf"
+            />
+            <span>
+              {lang === "zh"
+                ? "\u6211\u5df2\u9605\u8bfb\u5e76\u540c\u610f\u4e0a\u8ff0\u7b2c\u4e09\u65b9 AI \u5904\u7406\u544a\u77e5\u3002"
+                : "I have read and agree to the third-party AI processing notice above."}
+            </span>
+          </label>
+          <button
+            type="button"
+            onClick={acceptConsent}
+            disabled={!consentChecked || consentLoading}
+            className="mt-4 rounded-md bg-leaf px-4 py-2 font-medium text-white transition hover:bg-ink disabled:opacity-60"
+          >
+            {consentLoading
+              ? lang === "zh"
+                ? "\u6b63\u5728\u4fdd\u5b58..."
+                : "Saving..."
+              : lang === "zh"
+                ? "\u540c\u610f\u5e76\u7ee7\u7eed"
+                : "Agree and continue"}
+          </button>
+        </section>
+      ) : null}
       {children}
       <div className="grid gap-4 rounded-md border border-cyan-300/15 bg-cyan-300/[0.03] p-4 lg:grid-cols-[1.05fr_0.95fr]">
         <label
@@ -189,7 +285,7 @@ export function TCMCheckForm({
       </div>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       <button
-        disabled={loading}
+        disabled={loading || consentRequired}
         className="premium-button rounded-md px-5 py-3 font-medium disabled:opacity-60"
       >
         {loading ? "Analyzing..." : copy[lang].analyze}

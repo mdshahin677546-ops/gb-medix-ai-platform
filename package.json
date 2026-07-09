@@ -11,6 +11,7 @@
     "prisma:generate": "prisma generate",
     "test:email": "node --test tests/email-provider.test.mjs",
     "test:ai-provider": "node --test tests/ai-provider-adapter.test.mjs",
+    "test:ai-consent": "node --test tests/ai-consent-gate.test.mjs",
     "test:commercial": "node --test tests/sprint-1b-commercial-flow.test.mjs",
     "test:commercial:db": "node --test tests/sprint-1b-commercial-flow.integration.test.mjs",
     "test": "node --test tests/"
