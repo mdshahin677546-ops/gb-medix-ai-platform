@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
 import {
@@ -7,6 +6,8 @@ import {
   estimateTokens,
   recordAIUsage
 } from "@/lib/ai-security";
+import { getAIProvider, getSafeAIError } from "@/lib/ai/provider-factory";
+import { buildConsultSystemPrompt } from "@/lib/ai/prompts";
 import { hasActiveEntitlement, PRODUCT_CONSULT_PACK } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 
@@ -58,11 +59,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const model = "gpt-4o-mini";
+  let provider;
+  try {
+    provider = getAIProvider();
+  } catch (error) {
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
+  }
+
+  const model = provider.model;
   const estimatedTokens = estimateTokens(parsed.data.messages);
   const budgetError = await enforceAIUsageBudget({
     request,
     userId: user.id,
+    provider: provider.name,
     model,
     estimatedTokens
   });
@@ -89,17 +99,11 @@ export async function POST(request: Request) {
       : "I can help organize your question, but this is not a medical diagnosis. Note timing, duration, related sensations, and recent sleep or meal changes so a future licensed doctor can review more efficiently.";
   let tokens = estimatedTokens;
 
-  if (process.env.OPENAI_API_KEY) {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const completion = await openai.chat.completions.create({
-      model,
+  try {
+    const completion = await provider.generateChatCompletion({
+      systemPrompt: buildConsultSystemPrompt(),
       temperature: 0.3,
       messages: [
-        {
-          role: "system",
-          content:
-            "You are GB Medix AI pre-consultation assistant. The online doctor service is in beta and not currently active. Help users organize symptoms/questions for a future licensed doctor handoff. Never diagnose, prescribe, treat, claim certainty, or replace a doctor. For severe, sudden, or urgent symptoms, advise contacting local emergency services or a qualified clinician."
-        },
         ...parsed.data.messages.map((message) => ({
           role: message.role,
           content: message.content
@@ -108,13 +112,24 @@ export async function POST(request: Request) {
           role: "user",
           content: `Language: ${parsed.data.lang}\nCurrent focus: ${lastUserMessage}`
         }
-      ]
+      ],
+      fallbackContent: reply
     });
-    reply = completion.choices[0]?.message.content || reply;
-    tokens = completion.usage?.total_tokens || estimatedTokens;
+    reply = completion.content || reply;
+    tokens = completion.usage.totalTokens || estimatedTokens;
+  } catch (error) {
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
   }
 
-  await recordAIUsage({ request, userId: user.id, model, tokens, endpoint: "/api/consult" });
+  await recordAIUsage({
+    request,
+    userId: user.id,
+    provider: provider.name,
+    model,
+    tokens,
+    endpoint: "/api/consult"
+  });
   await prisma.message.create({
     data: {
       conversationId: conversation.id,

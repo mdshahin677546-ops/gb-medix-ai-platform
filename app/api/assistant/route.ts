@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
 import {
@@ -7,6 +6,8 @@ import {
   estimateTokens,
   recordAIUsage
 } from "@/lib/ai-security";
+import { getAIProvider, getSafeAIError } from "@/lib/ai/provider-factory";
+import { buildAssistantSystemPrompt } from "@/lib/ai/prompts";
 import { prisma } from "@/lib/prisma";
 
 const messageSchema = z.object({
@@ -40,29 +41,7 @@ const requestSchema = z.object({
   messages: z.array(messageSchema).min(1).max(12)
 });
 
-const systemPrompt = `You are GB Medix AI Wellness Assistant.
-
-Product position:
-* You are an original AI wellness companion for GB Medix, not a clone of any other brand.
-* You can explain wellness patterns, lifestyle rhythm, sleep, energy, diet, stress, and TCM-inspired constitution signals.
-* You can explain uploaded report images in plain language, but you must not interpret them as a diagnosis.
-* You can identify supplement, nutrition, or wellness product images, but you must not prescribe use, dosage, or treatment.
-* You may invite users to take the body type test when it helps them get a structured report.
-
-Safety rules:
-* Never diagnose diseases.
-* Never treat conditions.
-* Never prescribe medicine, herbs, supplements, or dosages.
-* Never claim medical certainty.
-* Never provide emergency medical instructions.
-* Do not replace a licensed clinician.
-* For severe, sudden, persistent, or concerning symptoms, advise the user to contact a qualified medical professional or local emergency services.
-
-Style:
-* Warm, concise, reflective, and practical.
-* Use plain language.
-* Keep answers under 180 words.
-* End with one useful next step.`;
+const systemPrompt = buildAssistantSystemPrompt();
 
 const fallbackReply =
   "I can reflect on this as a wellness pattern, not a diagnosis. Your signal may relate to sleep rhythm, meal timing, stress load, hydration, or recovery habits. A useful next step is to track sleep quality, energy level, meals, and body sensations for 3 days, then take the body type test for a structured TCM-inspired report.";
@@ -88,7 +67,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const model = "gpt-4o-mini";
+  let provider;
+  try {
+    provider = getAIProvider();
+  } catch (error) {
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
+  }
+
+  const model = provider.model;
   const estimatedTokens =
     estimateTokens({
       ...input,
@@ -97,6 +84,7 @@ export async function POST(request: Request) {
   const budgetError = await enforceAIUsageBudget({
     request,
     userId: user.id,
+    provider: provider.name,
     model,
     estimatedTokens
   });
@@ -108,13 +96,12 @@ export async function POST(request: Request) {
       : fallbackReply;
   let tokens = estimatedTokens;
 
-  if (process.env.OPENAI_API_KEY) {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  try {
     const lastUserMessage =
       input.messages.filter((message) => message.role === "user").at(-1)?.content || "";
     const context = `Language: ${input.lang}
 Mode: ${input.mode}
-Family member: ${input.familyMember?.name || "Self"}
+Family context: ${input.familyMember ? "Family member" : "Self"}
 Family note: ${input.familyMember?.note || "N/A"}
 User message: ${lastUserMessage}`;
     const userContent = input.imageData
@@ -124,24 +111,34 @@ User message: ${lastUserMessage}`;
         ]
       : context;
 
-    const completion = await openai.chat.completions.create({
-      model,
+    const completion = await provider.generateChatCompletion({
+      systemPrompt,
       temperature: 0.4,
       messages: [
-        { role: "system", content: systemPrompt },
         ...input.messages.slice(0, -1).map((message) => ({
           role: message.role,
           content: message.content
         })),
-        { role: "user", content: userContent as any }
-      ]
+        { role: "user", content: userContent }
+      ],
+      fallbackContent: fallbackReply
     });
 
-    reply = completion.choices[0]?.message.content || fallbackReply;
-    tokens = completion.usage?.total_tokens || estimatedTokens;
+    reply = completion.content || fallbackReply;
+    tokens = completion.usage.totalTokens || estimatedTokens;
+  } catch (error) {
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
   }
 
-  await recordAIUsage({ request, userId: user.id, model, tokens, endpoint: "/api/assistant" });
+  await recordAIUsage({
+    request,
+    userId: user.id,
+    provider: provider.name,
+    model,
+    tokens,
+    endpoint: "/api/assistant"
+  });
   await prisma.assistantSession.create({
     data: {
       userId: user.id,

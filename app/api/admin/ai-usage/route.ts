@@ -22,7 +22,7 @@ export async function GET() {
   dayStart.setUTCHours(0, 0, 0, 0);
   const where = { createdAt: { gte: dayStart } };
 
-  const [daily, byUser, byEndpoint] = await Promise.all([
+  const [daily, byUser, byEndpoint, byProvider] = await Promise.all([
     prisma.aIUsage.aggregate({ where, _sum: { tokens: true, cost: true }, _count: true }),
     prisma.aIUsage.groupBy({
       by: ["userId"],
@@ -32,6 +32,12 @@ export async function GET() {
     }),
     prisma.aIUsage.groupBy({
       by: ["endpoint"],
+      where,
+      _sum: { tokens: true, cost: true },
+      _count: true
+    }),
+    prisma.aIUsage.groupBy({
+      by: ["provider", "model"],
       where,
       _sum: { tokens: true, cost: true },
       _count: true
@@ -53,6 +59,13 @@ export async function GET() {
     })),
     byEndpoint: byEndpoint.map((row) => ({
       endpoint: row.endpoint,
+      calls: row._count,
+      tokens: row._sum.tokens || 0,
+      cost: row._sum.cost || 0
+    })),
+    byProvider: byProvider.map((row) => ({
+      provider: row.provider,
+      model: row.model,
       calls: row._count,
       tokens: row._sum.tokens || 0,
       cost: row._sum.cost || 0

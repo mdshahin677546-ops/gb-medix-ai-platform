@@ -187,6 +187,7 @@ model AIUsage {
   id        String   @id @default(cuid())
   userId    String
   ip        String   @default("unknown")
+  provider  String   @default("openai")
   model     String
   tokens    Int
   cost      Float
@@ -196,7 +197,9 @@ model AIUsage {
 
   @@index([userId])
   @@index([ip])
+  @@index([provider])
   @@index([model])
+  @@index([provider, model])
   @@index([endpoint])
   @@index([createdAt])
 }

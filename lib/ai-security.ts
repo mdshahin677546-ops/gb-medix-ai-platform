@@ -14,11 +14,21 @@ export function estimateTokens(value: unknown) {
   return Math.ceil(text.length / 4);
 }
 
-export function estimateCost(model: string, tokens: number) {
-  if (model === "gpt-4o-mini") {
+export function estimateCost({
+  provider,
+  model,
+  tokens
+}: {
+  provider: string;
+  model: string;
+  tokens: number;
+}) {
+  if (provider === "openai" && model === "gpt-4o-mini") {
     return (tokens / 1_000_000) * 0.6;
   }
 
+  // Provider/model pricing is audited before production use. Unknown costs are
+  // recorded as 0 rather than guessed, while tokens remain fully tracked.
   return 0;
 }
 
@@ -42,11 +52,13 @@ export function clientIp(request: Request) {
 export async function enforceAIUsageBudget({
   request,
   userId,
+  provider,
   model,
   estimatedTokens
 }: {
   request: Request;
   userId: string;
+  provider?: string;
   model: string;
   estimatedTokens: number;
 }) {
@@ -94,7 +106,7 @@ export async function enforceAIUsageBudget({
         })
       : Promise.resolve({ _sum: { tokens: 0 } }),
     prisma.aIUsage.count({
-      where: { userId, model, createdAt: { gte: dayStart } }
+      where: { userId, ...(provider ? { provider } : {}), model, createdAt: { gte: dayStart } }
     }),
     prisma.aIUsage.aggregate({
       where: { userId, createdAt: { gte: dayStart } },
@@ -141,12 +153,14 @@ export async function enforceAIUsageBudget({
 export async function recordAIUsage({
   request,
   userId,
+  provider,
   model,
   tokens,
   endpoint = "unknown"
 }: {
   request: Request;
   userId: string;
+  provider: string;
   model: string;
   tokens: number;
   endpoint?: string;
@@ -155,9 +169,10 @@ export async function recordAIUsage({
     data: {
       userId,
       ip: clientIp(request),
+      provider,
       model,
       tokens,
-      cost: estimateCost(model, tokens),
+      cost: estimateCost({ provider, model, tokens }),
       endpoint
     }
   });

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
 import {
@@ -7,11 +6,12 @@ import {
   estimateTokens,
   recordAIUsage
 } from "@/lib/ai-security";
+import { getAIProvider, getSafeAIError } from "@/lib/ai/provider-factory";
+import { buildHealthAssessmentSystemPrompt } from "@/lib/ai/prompts";
+import { buildMinimalHealthPayload } from "@/lib/ai/sanitize";
 import { prisma } from "@/lib/prisma";
 import {
   fallbackStructuredReport,
-  ReportSchema,
-  reportJsonInstruction,
   structuredReportToTCMResult,
   toFreeReportPayload
 } from "@/lib/report-schema";
@@ -31,18 +31,6 @@ const inputSchema = z.object({
   lang: z.string().default("en")
 });
 
-const systemPrompt = `You are GB Medix AI Wellness Assistant.
-
-Rules:
-* Never diagnose
-* Never treat disease
-* Never prescribe
-* Never claim medical certainty
-* Only provide wellness insights, body pattern analysis, lifestyle suggestions, and TCM-inspired constitution classification.
-* Do not provide emergency medical instructions.
-* Keep conversion language curious and reflective, not salesy.
-* ${reportJsonInstruction()}`;
-
 export async function POST(request: Request) {
   const parsed = inputSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -61,11 +49,21 @@ export async function POST(request: Request) {
   }
 
   const input = parsed.data;
-  const model = "gpt-4o-mini";
-  const estimatedTokens = estimateTokens(input);
+  let provider;
+  try {
+    provider = getAIProvider();
+  } catch (error) {
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
+  }
+
+  const model = provider.model;
+  const aiInput = buildMinimalHealthPayload(input);
+  const estimatedTokens = estimateTokens(aiInput);
   const budgetError = await enforceAIUsageBudget({
     request,
     userId: user.id,
+    provider: provider.name,
     model,
     estimatedTokens
   });
@@ -74,54 +72,27 @@ export async function POST(request: Request) {
   let report = fallbackStructuredReport();
   let tokens = estimatedTokens;
 
-  if (process.env.OPENAI_API_KEY) {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const completion = await openai.chat.completions.create({
-      model,
+  try {
+    const completion = await provider.generateHealthAssessment({
+      systemPrompt: buildHealthAssessmentSystemPrompt(),
+      input: aiInput,
       temperature: 0.5,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `Language: ${input.lang}
-Sleep quality: ${input.sleepQuality}
-Fatigue level: ${input.fatigueLevel}
-Emotional state: ${input.emotionalState}
-Diet habits: ${input.dietHabits}
-Body sensations: ${input.bodySensations}
-Digestion pattern: ${input.digestionPattern}
-Thirst and temperature preference: ${input.thirstPattern}
-Activity level: ${input.activityLevel}
-Stress rhythm: ${input.stressPattern}
-Uploaded context: ${input.uploadSummary || "No uploaded file"}
-Extra notes: ${input.extraNotes}`
-        }
-      ]
     });
-
-    const content = completion.choices[0]?.message.content || "";
-    let rawReport: unknown;
-    try {
-      rawReport = JSON.parse(content);
-    } catch {
-      return NextResponse.json(
-        { error: "AI report output was not valid JSON." },
-        { status: 502 }
-      );
-    }
-    const parsedReport = ReportSchema.safeParse(rawReport);
-    if (!parsedReport.success) {
-      return NextResponse.json(
-        { error: "AI report output failed schema validation." },
-        { status: 502 }
-      );
-    }
-    report = parsedReport.data;
-    tokens = completion.usage?.total_tokens || estimatedTokens;
+    report = completion.content;
+    tokens = completion.usage.totalTokens || estimatedTokens;
+  } catch (error) {
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
   }
 
-  await recordAIUsage({ request, userId: user.id, model, tokens, endpoint: "/api/tcm" });
+  await recordAIUsage({
+    request,
+    userId: user.id,
+    provider: provider.name,
+    model,
+    tokens,
+    endpoint: "/api/tcm"
+  });
   const result = structuredReportToTCMResult(report);
 
   const record = await prisma.tCMRecord.create({

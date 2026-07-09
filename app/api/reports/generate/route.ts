@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
 import {
@@ -12,10 +11,12 @@ import {
   RESOURCE_ASSESSMENT,
   checkEntitlement
 } from "@/lib/entitlements";
+import { getAIProvider, getSafeAIError } from "@/lib/ai/provider-factory";
+import { buildReportSystemPrompt } from "@/lib/ai/prompts";
+import { buildMinimalHealthPayload } from "@/lib/ai/sanitize";
 import {
   fallbackStructuredReport,
   ReportSchema,
-  reportJsonInstruction,
   toFreeReportPayload
 } from "@/lib/report-schema";
 import { prisma } from "@/lib/prisma";
@@ -83,14 +84,27 @@ export async function POST(request: Request) {
     }
   }
 
-  const model = "gpt-4o-mini";
+  let provider;
+  try {
+    provider = getAIProvider();
+  } catch (error) {
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
+  }
+
+  const model = provider.model;
   const assessmentInput = safeJson(assessment.input);
   const assessmentResult = safeJson(assessment.result);
-  const aiInput = { assessmentInput, assessmentResult, reportType: parsed.data.reportType };
+  const aiInput = buildMinimalHealthPayload({
+    assessmentInput,
+    assessmentResult,
+    reportType: parsed.data.reportType
+  });
   const estimatedTokens = estimateTokens(aiInput);
   const budgetError = await enforceAIUsageBudget({
     request,
     userId: user.id,
+    provider: provider.name,
     model,
     estimatedTokens
   });
@@ -133,55 +147,27 @@ export async function POST(request: Request) {
   let report = fallbackStructuredReport();
   let tokens = estimatedTokens;
 
-  if (process.env.OPENAI_API_KEY) {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const completion = await openai.chat.completions.create({
-      model,
+  try {
+    const completion = await provider.generateReport({
+      systemPrompt: buildReportSystemPrompt(),
+      input: aiInput,
       temperature: parsed.data.reportType === "premium_health_report" ? 0.45 : 0.35,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You generate structured AI health management reports for GB Medix. " +
-            "Never provide medical diagnosis, treatment promises, disease probability, or triage direction. " +
-            reportJsonInstruction()
-        },
-        { role: "user", content: JSON.stringify(aiInput) }
-      ]
     });
-
-    const content = completion.choices[0]?.message.content || "";
-    let rawReport: unknown;
-    try {
-      rawReport = JSON.parse(content);
-    } catch {
-      await prisma.aIReport.update({
-        where: { id: placeholder.id },
-        data: { status: "failed" }
-      });
-      return NextResponse.json({ error: "AI report output was not valid JSON." }, { status: 502 });
-    }
-
-    const reportParse = ReportSchema.safeParse(rawReport);
-    if (!reportParse.success) {
-      await prisma.aIReport.update({
-        where: { id: placeholder.id },
-        data: { status: "failed" }
-      });
-      return NextResponse.json(
-        { error: "AI report output failed schema validation." },
-        { status: 502 }
-      );
-    }
-
-    report = reportParse.data;
-    tokens = completion.usage?.total_tokens || estimatedTokens;
+    report = completion.content;
+    tokens = completion.usage.totalTokens || estimatedTokens;
+  } catch (error) {
+    await prisma.aIReport.update({
+      where: { id: placeholder.id },
+      data: { status: "failed" }
+    });
+    const safeError = getSafeAIError(error);
+    return NextResponse.json({ error: safeError.message }, { status: safeError.status });
   }
 
   await recordAIUsage({
     request,
     userId: user.id,
+    provider: provider.name,
     model,
     tokens,
     endpoint: "/api/reports/generate"
