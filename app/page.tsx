@@ -1,5 +1,36 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "AI Health Assessment",
+  description:
+    "Take a free 3-minute AI health assessment, understand your body patterns, and unlock personalized wellness guidance with GB Medix AI.",
+  alternates: {
+    canonical: "/"
+  },
+  openGraph: {
+    title: "AI Health Assessment | GB Medix AI",
+    description:
+      "Free AI health assessment with health score, constitution pattern, and optional Premium health management report.",
+    url: "/",
+    images: [
+      {
+        url: "/assets/medical-body-scan.png",
+        width: 1200,
+        height: 630,
+        alt: "GB Medix AI health assessment visualization"
+      }
+    ]
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "AI Health Assessment | GB Medix AI",
+    description:
+      "Start a free AI health assessment and receive personalized wellness guidance.",
+    images: ["/assets/medical-body-scan.png"]
+  }
+};
 
 const entryCards = [
   {
