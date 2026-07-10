@@ -41,11 +41,11 @@ export function PremiumUnlockButton({
         type="button"
         onClick={startCheckout}
         disabled={loading}
-        className="rounded-md bg-clay px-5 py-3 font-medium text-white transition hover:bg-ink disabled:opacity-60"
+        className="rounded-md bg-clay px-5 py-3 font-medium text-[#03101c] transition hover:brightness-110 disabled:opacity-60"
       >
         {loading ? "Opening Stripe..." : "Unlock Premium Report"}
       </button>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="text-sm text-red-400">{error}</p> : null}
     </div>
   );
 }
@@ -83,11 +83,11 @@ export function PremiumGenerateButton({
         type="button"
         onClick={generatePremium}
         disabled={loading}
-        className="rounded-md bg-leaf px-5 py-3 font-medium text-white transition hover:bg-ink disabled:opacity-60"
+        className="rounded-md bg-leaf px-5 py-3 font-medium text-[#03101c] transition hover:brightness-110 disabled:opacity-60"
       >
         {loading ? "Generating..." : "Generate Premium Report"}
       </button>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="text-sm text-red-400">{error}</p> : null}
     </div>
   );
 }

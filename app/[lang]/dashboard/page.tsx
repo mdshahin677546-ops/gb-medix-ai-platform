@@ -208,7 +208,7 @@ export default async function DashboardPage({
               <h2 className="text-xl font-semibold text-ink">
                 {lang === "zh" ? "\u5065\u5eb7\u7ba1\u7406\u8def\u5f84" : "Health Management Path"}
               </h2>
-              <span className="rounded-md border border-white/10 px-3 py-1 text-xs text-ink/50">
+              <span className="rounded-md border border-white/10 px-3 py-1 text-xs text-ink/60">
                 Personal
               </span>
             </div>
@@ -320,7 +320,7 @@ function StatusModule({
             key={label}
             className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2"
           >
-            <span className="text-xs text-ink/45">{label}</span>
+            <span className="text-xs text-ink/60">{label}</span>
             <span className="max-w-[54%] truncate text-right text-xs font-medium text-ink/80">
               {value}
             </span>
@@ -399,7 +399,7 @@ function PathStep({
           className={
             isActive
               ? "grid h-8 w-8 shrink-0 place-items-center rounded-md border border-mint/35 bg-mint/15 text-xs font-semibold text-mint"
-              : "grid h-8 w-8 shrink-0 place-items-center rounded-md border border-white/10 bg-white/5 text-xs font-semibold text-ink/45"
+              : "grid h-8 w-8 shrink-0 place-items-center rounded-md border border-white/10 bg-white/5 text-xs font-semibold text-ink/60"
           }
         >
           {index + 1}
@@ -407,14 +407,14 @@ function PathStep({
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3 text-sm">
             <span className="font-medium text-ink">{label}</span>
-            <span className={isActive ? "text-mint" : "text-ink/45"}>{progress}</span>
+            <span className={isActive ? "text-mint" : "text-ink/60"}>{progress}</span>
           </div>
           <div className="mt-3 h-2 rounded-md bg-white/10">
             <div
               className={
                 isActive
                   ? "h-2 rounded-md bg-gradient-to-r from-mint to-cyan-300"
-                  : "h-2 rounded-md bg-white/25"
+                  : "h-2 rounded-md bg-white/20"
               }
               style={{ width: progress }}
             />
@@ -445,7 +445,7 @@ function RecordSection({
           ))}
         </ul>
       ) : (
-        <p className="mt-3 text-sm text-ink/45">{empty}</p>
+        <p className="mt-3 text-sm text-ink/60">{empty}</p>
       )}
     </section>
   );

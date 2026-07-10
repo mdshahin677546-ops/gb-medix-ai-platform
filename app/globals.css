@@ -6,6 +6,18 @@
   color-scheme: dark;
 }
 
+@layer base {
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+  }
+
+  h1 {
+    @apply tracking-tight;
+  }
+}
+
 body {
   min-height: 100vh;
   background:
@@ -54,6 +66,16 @@ textarea {
   pointer-events: none;
   position: absolute;
   z-index: -1;
+}
+
+/* Radius hierarchy: large surfaces read softer than controls (rounded-md). */
+.glass-panel,
+.dark-panel {
+  border-radius: 1rem;
+}
+
+.metric-tile {
+  border-radius: 0.75rem;
 }
 
 .glass-panel {
@@ -284,32 +306,6 @@ textarea {
   height: 3px;
 }
 
-.command-shell .bg-white,
-.command-shell .bg-pearl,
-.command-shell .bg-white\/25,
-.command-shell .bg-white\/35,
-.command-shell .bg-white\/55,
-.command-shell .bg-white\/65,
-.command-shell .bg-white\/70,
-.command-shell .bg-white\/75,
-.command-shell .bg-white\/80,
-.command-shell .bg-pearl\/65,
-.command-shell .bg-pearl\/70 {
-  background-color: rgba(9, 25, 41, 0.72) !important;
-}
-
-.command-shell .border-black\/10,
-.command-shell .border-black\/15 {
-  border-color: rgba(115, 231, 255, 0.14) !important;
-}
-
-.command-shell .text-ink\/55,
-.command-shell .text-ink\/60,
-.command-shell .text-ink\/70,
-.command-shell .text-ink\/75 {
-  color: rgba(218, 238, 255, 0.68) !important;
-}
-
 .metric-tile {
   background: linear-gradient(180deg, rgba(17, 39, 60, 0.94), rgba(7, 20, 34, 0.86));
   border: 1px solid rgba(115, 231, 255, 0.13);
@@ -352,8 +348,8 @@ textarea {
 }
 
 .product-scan {
-  animation: product-scan 2.4s ease-in-out infinite;
-  background: linear-gradient(180deg, transparent 0%, rgba(99, 245, 215, 0.22) 48%, transparent 100%);
+  animation: product-scan 6s ease-in-out infinite;
+  background: linear-gradient(180deg, transparent 0%, rgba(99, 245, 215, 0.14) 48%, transparent 100%);
   transform: translateY(-100%);
 }
 

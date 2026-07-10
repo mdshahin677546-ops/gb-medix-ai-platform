@@ -27,12 +27,12 @@ export function ResultView({ lang }: { lang: Lang }) {
       <Section title="Risk Level">{result.riskLevel}</Section>
       <List title="Hidden Signals" items={result.hiddenSignals} muted />
       <List title="7-Day Plan Preview (30%)" items={result.sevenDayPlanPreview} />
-      <div className="rounded-md border border-leaf/25 bg-white p-5">
+      <div className="rounded-md border border-leaf/25 bg-mist/85 p-5">
         <h2 className="text-xl font-semibold text-ink">Upgrade CTA</h2>
         <p className="mt-2 text-ink/75">{result.upgradeCta}</p>
         <Link
           href={`/${lang}/checkout${recordId ? `?assessmentId=${recordId}` : ""}`}
-          className="mt-4 inline-flex rounded-md bg-leaf px-5 py-3 font-medium text-white hover:bg-ink"
+          className="mt-4 inline-flex rounded-md bg-leaf px-5 py-3 font-medium text-[#03101c] hover:brightness-110"
         >
           Unlock Full Plan
         </Link>
@@ -49,7 +49,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-md border border-black/10 bg-white p-5">
+    <section className="rounded-md border border-white/10 bg-mist/85 p-5">
       <h2 className="text-xl font-semibold text-ink">{title}</h2>
       <p className="mt-2 text-ink/75">{children}</p>
     </section>
@@ -66,7 +66,7 @@ function List({
   muted?: boolean;
 }) {
   return (
-    <section className="rounded-md border border-black/10 bg-white p-5">
+    <section className="rounded-md border border-white/10 bg-mist/85 p-5">
       <h2 className="text-xl font-semibold text-ink">{title}</h2>
       <ul className="mt-3 grid gap-2 text-ink/75">
         {items.map((item) => (

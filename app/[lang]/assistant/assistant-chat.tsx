@@ -152,7 +152,7 @@ export function AssistantChat({ lang }: { lang: Lang }) {
 
   return (
     <section className="glass-panel overflow-hidden rounded-md">
-      <div className="grid gap-4 border-b border-black/10 bg-white/35 p-4 md:grid-cols-[1fr_260px]">
+      <div className="grid gap-4 border-b border-white/10 bg-white/[0.03] p-4 md:grid-cols-[1fr_260px]">
         <div>
           <div className="flex flex-wrap gap-2">
             {(Object.keys(modeLabels) as AssistantMode[]).map((item) => (
@@ -162,14 +162,14 @@ export function AssistantChat({ lang }: { lang: Lang }) {
                 className={
                   mode === item
                     ? "premium-button rounded-md px-3 py-2 text-sm"
-                    : "rounded-md border border-black/10 bg-white/65 px-3 py-2 text-sm text-ink/75 transition hover:border-leaf"
+                    : "rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-ink/75 transition hover:border-leaf"
                 }
               >
                 {modeLabels[item]}
               </button>
             ))}
           </div>
-          <label className="mt-3 inline-flex cursor-pointer rounded-md border border-black/10 bg-white/65 px-3 py-2 text-sm text-ink/75 transition hover:border-leaf">
+          <label className="mt-3 inline-flex cursor-pointer rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-ink/75 transition hover:border-leaf">
             Upload image
             <input
               type="file"
@@ -181,9 +181,9 @@ export function AssistantChat({ lang }: { lang: Lang }) {
           {imageName ? (
             <p className="mt-2 text-xs text-ink/60">Attached: {imageName}</p>
           ) : null}
-          {error ? <p className="mt-2 text-xs text-red-700">{error}</p> : null}
+          {error ? <p className="mt-2 text-xs text-red-400">{error}</p> : null}
         </div>
-        <div className="rounded-md border border-black/10 bg-pearl/70 p-3">
+        <div className="rounded-md border border-white/10 bg-mist/70 p-3">
           <label className="text-xs font-medium uppercase tracking-[0.12em] text-ink/55">
             Family profile
           </label>
@@ -208,7 +208,7 @@ export function AssistantChat({ lang }: { lang: Lang }) {
             />
             <button
               onClick={addMember}
-              className="rounded-md bg-ink px-3 py-2 text-sm text-white transition hover:bg-leaf"
+              className="rounded-md bg-leaf px-3 py-2 text-sm font-medium text-[#03101c] transition hover:bg-mint"
             >
               Add
             </button>
@@ -216,32 +216,32 @@ export function AssistantChat({ lang }: { lang: Lang }) {
         </div>
       </div>
 
-      <div className="grid max-h-[560px] min-h-[420px] content-start gap-3 overflow-y-auto bg-white/25 p-5">
+      <div className="grid max-h-[560px] min-h-[420px] content-start gap-3 overflow-y-auto bg-night/40 p-5">
         {messages.map((message, index) => (
           <div
             key={`${message.role}-${index}`}
             className={
               message.role === "user"
                 ? "ml-auto max-w-[82%] rounded-md bg-leaf px-4 py-3 text-white"
-                : "mr-auto max-w-[88%] rounded-md border border-black/10 bg-white/80 px-4 py-3 text-ink shadow-sm"
+                : "mr-auto max-w-[88%] rounded-md border border-white/10 bg-mist/80 px-4 py-3 text-ink shadow-sm"
             }
           >
             <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
           </div>
         ))}
         {loading ? (
-          <div className="mr-auto rounded-md border border-black/10 bg-white/80 px-4 py-3 text-sm text-ink/70 shadow-sm">
+          <div className="mr-auto rounded-md border border-white/10 bg-mist/80 px-4 py-3 text-sm text-ink/70 shadow-sm">
             Thinking...
           </div>
         ) : null}
       </div>
-      <div className="border-t border-black/10 bg-pearl/65 p-4">
+      <div className="border-t border-white/10 bg-mist/70 p-4">
         <div className="mb-3 flex flex-wrap gap-2">
           {starters.map((starter) => (
             <button
               key={starter}
               onClick={() => send(starter)}
-              className="rounded-md border border-black/10 bg-white/70 px-3 py-2 text-xs text-ink/75 transition hover:border-leaf hover:bg-white"
+              className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-ink/75 transition hover:border-leaf hover:bg-white/10"
             >
               {starter}
             </button>

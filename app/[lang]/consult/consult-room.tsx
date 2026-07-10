@@ -133,7 +133,7 @@ export function ConsultRoom({ lang }: { lang: Lang }) {
   return (
     <section className="grid gap-5 lg:grid-cols-[1fr_320px]">
       <div className="glass-panel overflow-hidden rounded-md">
-        <div className="flex items-center justify-between border-b border-black/10 bg-white/35 p-4">
+        <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.03] p-4">
           <div>
             <p className="text-sm font-semibold text-ink">
               {lang === "zh" ? "\u9884\u95ee\u8bca\u5ba4" : "Pre-consult room"}
@@ -148,26 +148,26 @@ export function ConsultRoom({ lang }: { lang: Lang }) {
             {lang === "zh" ? "\u533b\u751f\u5bf9\u63a5\u5185\u6d4b" : "Doctor handoff beta"}
           </span>
         </div>
-        <div className="grid min-h-[420px] content-start gap-3 bg-white/25 p-5">
+        <div className="grid min-h-[420px] content-start gap-3 bg-night/40 p-5">
           {messages.map((message, index) => (
             <div
               key={`${message.role}-${index}`}
               className={
                 message.role === "user"
                   ? "ml-auto max-w-[82%] rounded-md bg-leaf px-4 py-3 text-white"
-                  : "mr-auto max-w-[88%] rounded-md border border-black/10 bg-white/80 px-4 py-3 text-ink shadow-sm"
+                  : "mr-auto max-w-[88%] rounded-md border border-white/10 bg-mist/80 px-4 py-3 text-ink shadow-sm"
               }
             >
               <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
             </div>
           ))}
           {loading ? (
-            <div className="mr-auto rounded-md border border-black/10 bg-white/80 px-4 py-3 text-sm text-ink/70">
+            <div className="mr-auto rounded-md border border-white/10 bg-mist/80 px-4 py-3 text-sm text-ink/70">
               Thinking...
             </div>
           ) : null}
         </div>
-        <form onSubmit={send} className="flex gap-2 border-t border-black/10 bg-pearl/65 p-4">
+        <form onSubmit={send} className="flex gap-2 border-t border-white/10 bg-mist/70 p-4">
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}

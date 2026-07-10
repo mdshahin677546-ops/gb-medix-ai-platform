@@ -27,11 +27,11 @@ export function RFQForm({ children }: { children: React.ReactNode }) {
   return (
     <form
       onSubmit={onSubmit}
-      className="mt-5 grid max-w-2xl gap-4 rounded-md border border-black/10 bg-white p-5"
+      className="mt-5 grid max-w-2xl gap-4 rounded-md border border-white/10 bg-mist/85 p-5"
     >
       {children}
       {status ? <p className="text-sm text-leaf">{status}</p> : null}
-      <button className="rounded-md bg-leaf px-5 py-3 font-medium text-white hover:bg-ink">
+      <button className="rounded-md bg-leaf px-5 py-3 font-medium text-[#03101c] hover:brightness-110">
         Submit RFQ
       </button>
     </form>

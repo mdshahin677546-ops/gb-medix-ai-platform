@@ -118,7 +118,7 @@ export default async function ShopPage({ params }: { params: { lang: string } })
                   className="rounded-md border border-white/10 bg-white/5 p-4 transition hover:border-mint/30 hover:bg-mint/10"
                 >
                   <p className="font-semibold text-ink">{item}</p>
-                  <p className="mt-2 text-xs text-ink/50">
+                  <p className="mt-2 text-xs text-ink/60">
                     Connected supply workflow
                   </p>
                 </div>

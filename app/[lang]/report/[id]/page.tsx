@@ -84,7 +84,7 @@ export default async function ReportPage({
   return (
     <Shell lang={lang}>
       <div className="grid gap-5">
-        <div className="rounded-md border border-white/10 bg-white p-5 text-ink">
+        <div className="rounded-md border border-white/10 bg-mist/85 p-5 text-ink">
           <p className="text-sm font-semibold text-leaf">
             {report.type === "premium_health_report" ? "Premium AI Health Report" : "Free AI Health Result"}
           </p>
@@ -219,7 +219,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-md border border-black/10 bg-white p-5 text-ink">
+    <section className="rounded-md border border-white/10 bg-mist/85 p-5 text-ink">
       <h2 className="text-xl font-semibold">{title}</h2>
       <div className="mt-3 text-ink/75">{children}</div>
     </section>
@@ -228,8 +228,8 @@ function Panel({
 
 function Badge({ label, value }: { label: string; value: string }) {
   return (
-    <span className="rounded-md border border-black/10 bg-ink/5 px-3 py-2">
-      <span className="text-ink/50">{label}: </span>
+    <span className="rounded-md border border-white/10 bg-ink/5 px-3 py-2">
+      <span className="text-ink/60">{label}: </span>
       <span className="font-medium">{value}</span>
     </span>
   );
@@ -273,7 +273,7 @@ function ProductList({
   return (
     <ul className="grid gap-3">
       {items.map((item) => (
-        <li key={`${item.category}-${item.title}`} className="rounded-md border border-black/10 p-3">
+        <li key={`${item.category}-${item.title}`} className="rounded-md border border-white/10 p-3">
           <p className="font-medium">{item.productName || item.title}</p>
           <p className="mt-1 text-sm text-ink/60">{item.category}</p>
           <p className="mt-2">{item.reason}</p>

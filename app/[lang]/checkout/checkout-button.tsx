@@ -47,7 +47,7 @@ export function CheckoutButton({
           onChange={(event) => setEmail(event.target.value)}
           type="email"
           placeholder="you@example.com"
-          className="rounded-md border border-black/15 px-3 py-3 outline-none focus:border-leaf"
+          className="rounded-md border border-white/10 px-3 py-3 outline-none focus:border-leaf"
         />
       </label>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -56,7 +56,7 @@ export function CheckoutButton({
           className={
             provider === "stripe"
               ? "rounded-md bg-leaf px-4 py-3 text-white"
-              : "rounded-md border border-black/10 px-4 py-3 text-ink"
+              : "rounded-md border border-white/10 px-4 py-3 text-ink"
           }
         >
           Stripe
@@ -66,7 +66,7 @@ export function CheckoutButton({
           className={
             provider === "alipay"
               ? "rounded-md bg-leaf px-4 py-3 text-white"
-              : "rounded-md border border-black/10 px-4 py-3 text-ink"
+              : "rounded-md border border-white/10 px-4 py-3 text-ink"
           }
         >
           Alipay
@@ -75,11 +75,11 @@ export function CheckoutButton({
       <button
         onClick={startCheckout}
         disabled={loading}
-        className="rounded-md bg-clay px-5 py-3 font-medium text-white hover:bg-ink disabled:opacity-60"
+        className="rounded-md bg-clay px-5 py-3 font-medium text-[#03101c] hover:brightness-110 disabled:opacity-60"
       >
         {loading ? "Opening checkout..." : "Continue to Stripe Checkout"}
       </button>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="text-sm text-red-400">{error}</p> : null}
     </div>
   );
 }

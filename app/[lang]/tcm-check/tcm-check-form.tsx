@@ -212,7 +212,7 @@ export function TCMCheckForm({
                 {lang === "zh" ? "\u7b2c\u4e09\u65b9 AI \u5904\u7406\u544a\u77e5" : "Third-party AI processing notice"}
               </h2>
             </div>
-            <span className="rounded-md border border-amber/30 bg-white/45 px-3 py-1 text-xs font-medium text-ink">
+            <span className="rounded-md border border-amber/30 bg-white/[0.04] px-3 py-1 text-xs font-medium text-ink">
               {consentStatus?.provider}
             </span>
           </div>
@@ -229,7 +229,7 @@ export function TCMCheckForm({
               ? "\u67e5\u770b\u5b8c\u6574\u7b2c\u4e09\u65b9 AI \u5904\u7406\u8bf4\u660e"
               : "Read the full third-party AI processing notice"}
           </Link>
-          <label className="mt-4 flex items-start gap-3 rounded-md border border-amber/20 bg-white/45 p-3 text-sm text-ink/75">
+          <label className="mt-4 flex items-start gap-3 rounded-md border border-amber/20 bg-white/[0.04] p-3 text-sm text-ink/75">
             <input
               type="checkbox"
               checked={consentChecked}
@@ -246,7 +246,7 @@ export function TCMCheckForm({
             type="button"
             onClick={acceptConsent}
             disabled={!consentChecked || consentLoading}
-            className="mt-4 rounded-md bg-leaf px-4 py-2 font-medium text-white transition hover:bg-ink disabled:opacity-60"
+            className="mt-4 rounded-md bg-leaf px-4 py-2 font-medium text-[#03101c] transition hover:brightness-110 disabled:opacity-60"
           >
             {consentLoading
               ? lang === "zh"
@@ -352,7 +352,7 @@ export function TCMCheckForm({
           ) : null}
         </div>
       </div>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="text-sm text-red-400">{error}</p> : null}
       {submitDisabled && !loading ? (
         <p className="text-sm text-ink/55">
           {consentStatusLoading
@@ -405,7 +405,7 @@ function FlowStep({
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mint/70">{label}</p>
       <p className="mt-1 font-semibold text-ink">{title}</p>
       <p className="mt-1 flex items-center gap-2 text-xs text-ink/55">
-        <span className={done ? "h-2 w-2 rounded-full bg-leaf" : "h-2 w-2 rounded-full bg-white/25"} />
+        <span className={done ? "h-2 w-2 rounded-full bg-leaf" : "h-2 w-2 rounded-full bg-white/20"} />
         {detail}
       </p>
     </div>

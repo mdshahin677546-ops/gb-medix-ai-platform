@@ -66,7 +66,7 @@ export function DoctorLoginForm() {
       <button className="premium-button rounded-md px-5 py-3 font-medium">
         Enter doctor backend
       </button>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="text-sm text-red-400">{error}</p> : null}
     </form>
   );
 }

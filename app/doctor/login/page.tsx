@@ -5,7 +5,7 @@ export default function DoctorLoginPage() {
     <main className="ambient-grid min-h-screen px-5 py-10">
       <div className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-5xl content-center gap-6 lg:grid-cols-[1fr_420px] lg:items-center">
         <section>
-          <div className="inline-flex rounded-md border border-leaf/20 bg-white/65 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-leaf shadow-sm backdrop-blur">
+          <div className="inline-flex rounded-md border border-leaf/20 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-leaf shadow-sm backdrop-blur">
             Doctor Beta Console
           </div>
           <h1 className="mt-4 max-w-3xl text-5xl font-semibold text-ink">

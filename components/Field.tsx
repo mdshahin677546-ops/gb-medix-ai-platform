@@ -19,7 +19,7 @@ export function Field({
           name={name}
           type={type}
           required={required}
-          className="rounded-md border border-black/15 bg-white px-3 py-3 outline-none focus:border-leaf"
+          className="premium-input rounded-md px-3 py-3 text-ink outline-none"
         />
       )}
     </label>

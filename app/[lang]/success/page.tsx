@@ -119,7 +119,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="max-w-xl rounded-md border border-black/10 bg-white p-6 text-ink">
+    <section className="max-w-xl rounded-md border border-white/10 bg-mist/85 p-6 text-ink">
       <h1 className="text-3xl font-semibold">{title}</h1>
       <div className="mt-3 text-ink/75">{children}</div>
     </section>
