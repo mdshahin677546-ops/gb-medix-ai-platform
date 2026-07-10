@@ -20,6 +20,11 @@ type ConsentStatus = {
   acceptedAt?: string | null;
 };
 
+type SessionUser = {
+  email: string;
+  status: string;
+} | null;
+
 export function TCMCheckForm({
   lang,
   children
@@ -37,21 +42,121 @@ export function TCMCheckForm({
   const [consentLoading, setConsentLoading] = useState(false);
   const [consentMessage, setConsentMessage] = useState("");
   const [consentStatusLoading, setConsentStatusLoading] = useState(true);
+  const [sessionUser, setSessionUser] = useState<SessionUser>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [gateEmail, setGateEmail] = useState("");
+  const [gateBusy, setGateBusy] = useState(false);
+  const [gateNotice, setGateNotice] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  async function fetchConsent() {
+    setConsentStatusLoading(true);
+    try {
+      const response = await fetch("/api/ai-consent/status");
+      const data = response.ok ? await response.json() : null;
+      if (data) setConsentStatus(data);
+    } catch {
+      // Anonymous or offline: keep the consent step in its default state.
+    } finally {
+      setConsentStatusLoading(false);
+    }
+  }
+
+  async function refreshSession(): Promise<SessionUser> {
+    try {
+      const response = await fetch("/api/session");
+      const data = response.ok ? await response.json() : null;
+      const user: SessionUser = data?.user
+        ? { email: data.user.email, status: data.user.status }
+        : null;
+      setSessionUser(user);
+      return user;
+    } catch {
+      setSessionUser(null);
+      return null;
+    } finally {
+      setSessionLoading(false);
+    }
+  }
+
   useEffect(() => {
-    fetch("/api/ai-consent/status")
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (data) setConsentStatus(data);
-        setConsentStatusLoading(false);
-      })
-      .catch(() => setConsentStatusLoading(false));
+    refreshSession();
+    fetchConsent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const accountReady = sessionUser?.status === "active";
   const consentRequired = Boolean(consentStatus?.required && !consentStatus.accepted);
   const consentAccepted = Boolean(consentStatus?.required && consentStatus.accepted);
-  const submitDisabled = loading || consentStatusLoading || consentRequired;
+  const submitDisabled =
+    loading || sessionLoading || !accountReady || consentStatusLoading || consentRequired;
+
+  async function startVerification() {
+    const email = (sessionUser?.email || gateEmail).trim();
+    if (!email) return;
+    setGateBusy(true);
+    setError("");
+    setGateNotice("");
+
+    // Establish a session first so the intake continues on this device.
+    const sessionResponse = await fetch("/api/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email })
+    });
+    if (!sessionResponse.ok) {
+      setGateBusy(false);
+      setError(
+        lang === "zh" ? "邮箱登录失败,请重试。" : "Sign-in failed. Please try again."
+      );
+      return;
+    }
+
+    const sent = await fetch("/api/auth/send-verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email })
+    });
+    const data = await sent.json().catch(() => ({}));
+    setGateBusy(false);
+
+    if (!sent.ok) {
+      setError(
+        data.error ||
+          (lang === "zh"
+            ? "验证邮件发送失败,请稍后重试。"
+            : "The verification email could not be sent. Please try again later.")
+      );
+      return;
+    }
+
+    await refreshSession();
+    setGateNotice(
+      lang === "zh"
+        ? `验证邮件已发送到 ${email}。请点击邮件中的链接完成验证,然后回到本页点击“我已验证”。`
+        : `A verification email was sent to ${email}. Click the link inside it, then return here and press "I have verified".`
+    );
+  }
+
+  async function confirmVerified() {
+    setGateBusy(true);
+    const user = await refreshSession();
+    setGateBusy(false);
+    if (user?.status === "active") {
+      setGateNotice(
+        lang === "zh"
+          ? "邮箱已验证,现在可以开始健康评估。"
+          : "Email verified. You can start the health assessment now."
+      );
+      fetchConsent();
+    } else {
+      setGateNotice(
+        lang === "zh"
+          ? "还未检测到验证。请先点击邮件中的链接,再刷新状态。"
+          : "Verification not detected yet. Click the link in the email first, then refresh."
+      );
+    }
+  }
 
   async function acceptConsent() {
     setConsentLoading(true);
@@ -103,6 +208,14 @@ export function TCMCheckForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!accountReady) {
+      setError(
+        lang === "zh"
+          ? "请先在上方完成邮箱验证,再开始健康评估。"
+          : "Complete the email verification step above before starting the assessment."
+      );
+      return;
+    }
     if (consentRequired) {
       setError(
         lang === "zh"
@@ -146,6 +259,10 @@ export function TCMCheckForm({
           current ? { ...current, required: true, accepted: false } : current
         );
       }
+      if (response.status === 401 || response.status === 403) {
+        // Session or verification state changed server-side: resync the gate.
+        refreshSession();
+      }
       setError(data.message || data.error || "Analysis could not be completed. Please try again.");
       setLoading(false);
       return;
@@ -165,41 +282,151 @@ export function TCMCheckForm({
       onSubmit={onSubmit}
       className="glass-panel grid max-w-5xl gap-5 overflow-hidden rounded-md p-5 shadow-sm"
     >
-      <section className="grid gap-3 rounded-md border border-white/10 bg-white/[0.04] p-4 sm:grid-cols-3">
+      <section className="grid gap-3 rounded-md border border-white/10 bg-white/[0.04] p-4 sm:grid-cols-2 lg:grid-cols-4">
         <FlowStep
           active
-          done={!consentRequired && !consentStatusLoading}
+          done={accountReady}
           label={lang === "zh" ? "\u6b65\u9aa4 1" : "Step 1"}
-          title={lang === "zh" ? "AI \u5904\u7406\u544a\u77e5" : "AI processing notice"}
+          title={lang === "zh" ? "\u8d26\u6237\u5c31\u7eea" : "Account ready"}
           detail={
-            consentStatusLoading
+            sessionLoading
               ? lang === "zh"
                 ? "\u6b63\u5728\u68c0\u67e5"
                 : "Checking"
-              : consentRequired
+              : accountReady
                 ? lang === "zh"
-                  ? "\u9700\u8981\u786e\u8ba4"
-                  : "Action required"
-                : lang === "zh"
                   ? "\u5df2\u5c31\u7eea"
                   : "Ready"
+                : sessionUser
+                  ? lang === "zh"
+                    ? "\u7b49\u5f85\u90ae\u7bb1\u9a8c\u8bc1"
+                    : "Verify your email"
+                  : lang === "zh"
+                    ? "\u9700\u8981\u90ae\u7bb1\u767b\u5f55"
+                    : "Sign in with email"
           }
         />
         <FlowStep
-          active={!consentRequired}
-          done={false}
+          active={accountReady}
+          done={accountReady && !consentRequired && !consentStatusLoading}
           label={lang === "zh" ? "\u6b65\u9aa4 2" : "Step 2"}
+          title={lang === "zh" ? "AI \u5904\u7406\u544a\u77e5" : "AI processing notice"}
+          detail={
+            !accountReady
+              ? lang === "zh"
+                ? "\u9a8c\u8bc1\u540e\u8fdb\u884c"
+                : "After verification"
+              : consentStatusLoading
+                ? lang === "zh"
+                  ? "\u6b63\u5728\u68c0\u67e5"
+                  : "Checking"
+                : consentRequired
+                  ? lang === "zh"
+                    ? "\u9700\u8981\u786e\u8ba4"
+                    : "Action required"
+                  : lang === "zh"
+                    ? "\u5df2\u5c31\u7eea"
+                    : "Ready"
+          }
+        />
+        <FlowStep
+          active={accountReady && !consentRequired}
+          done={false}
+          label={lang === "zh" ? "\u6b65\u9aa4 3" : "Step 3"}
           title={lang === "zh" ? "\u5b8c\u6210\u95ee\u5377" : "Complete intake"}
           detail={lang === "zh" ? "\u7761\u7720\u3001\u996e\u98df\u3001\u538b\u529b\u7b49" : "Sleep, diet, stress, rhythm"}
         />
         <FlowStep
-          active={!consentRequired}
+          active={accountReady && !consentRequired}
           done={false}
-          label={lang === "zh" ? "\u6b65\u9aa4 3" : "Step 3"}
+          label={lang === "zh" ? "\u6b65\u9aa4 4" : "Step 4"}
           title={lang === "zh" ? "\u67e5\u770b\u62a5\u544a" : "View report"}
           detail={lang === "zh" ? "\u5065\u5eb7\u7ba1\u7406\u5efa\u8bae" : "Health management guidance"}
         />
       </section>
+
+      {!sessionLoading && !accountReady ? (
+        <section className="rounded-md border border-mint/25 bg-mint/[0.06] p-4 text-sm text-ink">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-mint">
+            {lang === "zh" ? "\u5f00\u59cb\u524d\u7684\u6700\u540e\u4e00\u6b65" : "One step before you start"}
+          </p>
+          {!sessionUser ? (
+            <>
+              <h2 className="mt-1 text-lg font-semibold text-ink">
+                {lang === "zh" ? "\u8f93\u5165\u90ae\u7bb1,\u9886\u53d6\u4f60\u7684 AI \u62a5\u544a" : "Enter your email to receive your AI report"}
+              </h2>
+              <p className="mt-2 leading-6 text-ink/75">
+                {lang === "zh"
+                  ? "\u62a5\u544a\u4f1a\u7ed1\u5b9a\u5230\u4f60\u7684\u90ae\u7bb1\u3002\u6211\u4eec\u53d1\u9001\u4e00\u5c01\u9a8c\u8bc1\u90ae\u4ef6,\u70b9\u51fb\u94fe\u63a5\u5373\u53ef,\u65e0\u9700\u5bc6\u7801\u3002"
+                  : "Your report is tied to your email. We send one verification email \u2014 click the link inside, no password needed."}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <input
+                  type="email"
+                  value={gateEmail}
+                  onChange={(event) => setGateEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  className="premium-input min-w-0 flex-1 rounded-md px-3 py-2.5 sm:max-w-xs"
+                />
+                <button
+                  type="button"
+                  onClick={startVerification}
+                  disabled={gateBusy || !gateEmail.trim()}
+                  className="rounded-md bg-leaf px-4 py-2.5 font-medium text-[#03101c] transition hover:brightness-110 disabled:opacity-60"
+                >
+                  {gateBusy
+                    ? lang === "zh"
+                      ? "\u6b63\u5728\u53d1\u9001..."
+                      : "Sending..."
+                    : lang === "zh"
+                      ? "\u53d1\u9001\u9a8c\u8bc1\u90ae\u4ef6"
+                      : "Send verification email"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2 className="mt-1 text-lg font-semibold text-ink">
+                {lang === "zh" ? `\u9a8c\u8bc1\u90ae\u7bb1 ${sessionUser.email}` : `Verify ${sessionUser.email}`}
+              </h2>
+              <p className="mt-2 leading-6 text-ink/75">
+                {lang === "zh"
+                  ? "\u70b9\u51fb\u9a8c\u8bc1\u90ae\u4ef6\u4e2d\u7684\u94fe\u63a5\u540e,\u56de\u5230\u672c\u9875\u5237\u65b0\u72b6\u6001\u5373\u53ef\u7ee7\u7eed\u3002\u6ca1\u6536\u5230\u90ae\u4ef6\u53ef\u4ee5\u91cd\u53d1\u3002"
+                  : "Click the link in the verification email, then refresh your status here to continue. You can resend the email if it did not arrive."}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={confirmVerified}
+                  disabled={gateBusy}
+                  className="rounded-md bg-leaf px-4 py-2.5 font-medium text-[#03101c] transition hover:brightness-110 disabled:opacity-60"
+                >
+                  {gateBusy
+                    ? lang === "zh"
+                      ? "\u6b63\u5728\u68c0\u67e5..."
+                      : "Checking..."
+                    : lang === "zh"
+                      ? "\u6211\u5df2\u9a8c\u8bc1,\u5237\u65b0\u72b6\u6001"
+                      : "I have verified"}
+                </button>
+                <button
+                  type="button"
+                  onClick={startVerification}
+                  disabled={gateBusy}
+                  className="rounded-md border border-white/10 bg-white/5 px-4 py-2.5 text-ink/75 transition hover:border-mint/60 hover:text-mint disabled:opacity-60"
+                >
+                  {lang === "zh" ? "\u91cd\u53d1\u9a8c\u8bc1\u90ae\u4ef6" : "Resend email"}
+                </button>
+              </div>
+            </>
+          )}
+          {gateNotice ? (
+            <p className="mt-3 rounded-md border border-mint/20 bg-mint/10 px-3 py-2 text-sm text-mint">
+              {gateNotice}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       {consentRequired ? (
         <section className="rounded-md border border-amber/30 bg-amber/10 p-4 text-sm text-ink shadow-[0_0_32px_rgba(245,170,66,0.08)]">
@@ -355,15 +582,19 @@ export function TCMCheckForm({
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
       {submitDisabled && !loading ? (
         <p className="text-sm text-ink/55">
-          {consentStatusLoading
+          {sessionLoading || consentStatusLoading
             ? lang === "zh"
-              ? "\u6b63\u5728\u68c0\u67e5 AI \u5904\u7406\u540c\u610f\u72b6\u6001..."
-              : "Checking AI processing consent status..."
-            : consentRequired
+              ? "\u6b63\u5728\u68c0\u67e5\u8d26\u6237\u4e0e\u6388\u6743\u72b6\u6001..."
+              : "Checking account and consent status..."
+            : !accountReady
               ? lang === "zh"
-                ? "\u8bf7\u5148\u5b8c\u6210\u4e0a\u65b9\u540c\u610f\u786e\u8ba4\u3002"
-                : "Complete the consent step above to enable assessment submission."
-              : ""}
+                ? "\u5b8c\u6210\u4e0a\u65b9\u90ae\u7bb1\u9a8c\u8bc1\u540e\u5373\u53ef\u63d0\u4ea4\u3002\u4f60\u5df2\u586b\u5199\u7684\u5185\u5bb9\u4f1a\u4fdd\u7559\u5728\u672c\u9875\u3002"
+                : "Finish the email verification above to submit. Everything you filled in stays on this page."
+              : consentRequired
+                ? lang === "zh"
+                  ? "\u8bf7\u5148\u5b8c\u6210\u4e0a\u65b9\u540c\u610f\u786e\u8ba4\u3002"
+                  : "Complete the consent step above to enable assessment submission."
+                : ""}
         </p>
       ) : null}
       <button
@@ -372,11 +603,15 @@ export function TCMCheckForm({
       >
         {loading
           ? "Analyzing..."
-          : consentRequired
+          : !accountReady && !sessionLoading
             ? lang === "zh"
-              ? "\u5148\u540c\u610f\u518d\u5f00\u59cb\u8bc4\u4f30"
-              : "Accept notice to start assessment"
-            : copy[lang].analyze}
+              ? "\u5148\u9a8c\u8bc1\u90ae\u7bb1\u518d\u5f00\u59cb\u8bc4\u4f30"
+              : "Verify email to start assessment"
+            : consentRequired
+              ? lang === "zh"
+                ? "\u5148\u540c\u610f\u518d\u5f00\u59cb\u8bc4\u4f30"
+                : "Accept notice to start assessment"
+              : copy[lang].analyze}
       </button>
     </form>
   );

@@ -8,14 +8,41 @@ export function AccountForm({ lang }: { lang: Lang }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [currentEmail, setCurrentEmail] = useState("");
+  const [userStatus, setUserStatus] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/session")
       .then((response) => response.json())
-      .then((data) => setCurrentEmail(data.user?.email || ""));
+      .then((data) => {
+        setCurrentEmail(data.user?.email || "");
+        setUserStatus(data.user?.status || "");
+      });
   }, []);
+
+  async function sendVerification(targetEmail: string) {
+    const response = await fetch("/api/auth/send-verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: targetEmail })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setStatus(
+        data.error ||
+          (lang === "zh"
+            ? "验证邮件发送失败,请稍后重试。"
+            : "The verification email could not be sent. Please try again later.")
+      );
+      return;
+    }
+    setStatus(
+      lang === "zh"
+        ? `验证邮件已发送到 ${targetEmail}。点击邮件中的链接完成验证后,即可开始健康评估。`
+        : `A verification email was sent to ${targetEmail}. Click the link inside to activate your account, then start the assessment.`
+    );
+  }
 
   async function login(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -28,6 +55,16 @@ export function AccountForm({ lang }: { lang: Lang }) {
     });
     const data = await response.json();
     setCurrentEmail(data.user?.email || "");
+    setUserStatus(data.user?.status || "");
+
+    // New or unverified account: guide through email verification instead of
+    // pushing into a flow that would reject the submission.
+    if (data.user?.status !== "active") {
+      await sendVerification(email);
+      setLoading(false);
+      return;
+    }
+
     setLoading(false);
     setStatus(
       lang === "zh"
@@ -51,6 +88,13 @@ export function AccountForm({ lang }: { lang: Lang }) {
             {lang === "zh" ? "\u5f53\u524d\u90ae\u7bb1" : "Current email"}
           </p>
           <p className="mt-1 font-medium text-ink">{currentEmail}</p>
+          {userStatus && userStatus !== "active" ? (
+            <p className="mt-3 rounded-md border border-amber/25 bg-amber/10 px-3 py-2 text-sm text-ink/75">
+              {lang === "zh"
+                ? "邮箱还未验证。点击验证邮件中的链接后即可使用 AI 功能。"
+                : "Your email is not verified yet. Click the link in the verification email to unlock AI features."}
+            </p>
+          ) : null}
           <div className="mt-4 flex flex-wrap gap-3">
             <button
               onClick={() => router.push(`/${lang}/tcm-check`)}
@@ -58,6 +102,14 @@ export function AccountForm({ lang }: { lang: Lang }) {
             >
               {lang === "zh" ? "\u7ee7\u7eed\u5065\u5eb7\u8bc4\u4f30" : "Continue assessment"}
             </button>
+            {userStatus && userStatus !== "active" ? (
+              <button
+                onClick={() => sendVerification(currentEmail)}
+                className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm transition hover:border-leaf"
+              >
+                {lang === "zh" ? "\u91cd\u53d1\u9a8c\u8bc1\u90ae\u4ef6" : "Resend verification email"}
+              </button>
+            ) : null}
             <button
               onClick={logout}
               className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm transition hover:border-leaf"
