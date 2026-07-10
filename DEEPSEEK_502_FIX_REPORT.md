@@ -32,13 +32,22 @@
 
 **类型：仅代码修复（provider 层），无业务逻辑/配置/Schema 改动。**
 
+### v2（按 Codex 反馈强化）
+
+v1 的 `extractJsonObject` 用朴素 `indexOf("{")`→`lastIndexOf("}")`，会错误接受**顶层数组**（如 `[{...}]` 提取出内部对象后竟通过 Zod）、并可能被字符串内部的 `}` 破坏。v2 改为**只接受唯一顶层 JSON object** 的严格提取：
+
 | 文件 | 改动 |
 |---|---|
-| `lib/ai/providers/openai-compatible.ts` | `generateStructuredJSON` 在 `JSON.parse` 前加入防御性 `extractJsonObject(content)`：容忍 markdown code fence 与前后文字，提取 JSON 对象；**仍强制** `JSON.parse` + `schema.safeParse`；任何无效仍抛 `AIProviderOutputError` → 安全 502、**不入库**。新增导出 `extractJsonObject` 辅助函数。 |
-| `tests/ai-provider-adapter.test.mjs` | 更新源码断言：由 `JSON.parse(content)` → `JSON.parse(extractJsonObject(content))`（意图不变：JSON 解析门禁仍在）。 |
-| `tests/deepseek-structured-json.test.mjs` | **新增**（12 用例）。 |
+| `lib/ai/providers/openai-compatible.ts` | 移除 `lastIndexOf` 朴素提取，改为 `extractTopLevelJsonObject`（返回 `string \| null`）+ `scanBalancedObjectEnd`：**字符串感知、转义感知、括号平衡**扫描，支持嵌套对象，忽略字符串内 `{}`。拒绝：顶层数组（含单元素）、多个并列对象、对象后追加第二个值、截断/不平衡、空内容。提取后**仍强制** `JSON.parse(candidate)` + `input.schema.safeParse(rawJson)`；`candidate===null` 或解析/校验失败 → `AIProviderOutputError` → 安全 502、**不入库**。 |
+| `tests/ai-provider-adapter.test.mjs` | 源码断言更新为 `extractTopLevelJsonObject(content)` + `JSON.parse(candidate)`（意图不变：JSON 解析门禁仍在）。 |
+| `tests/deepseek-structured-json.test.mjs` | **重写**（22 用例，覆盖所有要求场景）。 |
+| `package.json` | `test:ai-provider` 现同时运行 `tests/deepseek-structured-json.test.mjs`。 |
 
-**对应任务选项**：B（response_format/输出容错，仍要求纯 JSON）+ C（markdown code fence 安全提取，提取后再经 Zod）。
+**对应任务选项**：B（response_format/输出容错，仍要求纯 JSON）+ C（code fence / prose 安全提取，提取后再经 Zod），并按 Codex 要求收紧为"仅顶层单对象"。
+
+### failed placeholder 审计记录（要求 11）
+
+`app/api/reports/generate/route.ts` 在调用模型前 `upsert` 一条 placeholder `AIReport`；当 `generateReport` 失败（含本次 502 路径），在 `catch` 中 `update({ status: "failed" })` 保留该 placeholder 作为**失败审计记录**，随后返回 `getSafeAIError` 的 502。**不写入非法模型原文**（只落 `status:"failed"`）。本次修复**未改动**该审计逻辑。
 
 **严格遵守的红线（代码层面已核对）**：
 - ✅ 未关闭 Zod：仍 `input.schema.safeParse(rawJson)`。
@@ -58,18 +67,18 @@
 | 检查 | 结果 |
 |---|---|
 | `tsc --noEmit --incremental false` | ✅ 0 类型错误 |
-| 新增 `tests/deepseek-structured-json.test.mjs` | ✅ **12/12** |
-| `npm test`（全量） | ✅ **60 tests / 59 pass / 0 fail / 1 skip**（skip=Stripe HTTP e2e 无服务器） |
-| `test:commercial` / `test:email` / `test:ai-provider` / `test:ai-consent` | ✅ 各 6/6 |
+| `npm run test:ai-provider`（含 deepseek 测试） | ✅ **22/22** |
+| `npm test`（全量） | ✅ **64 tests / 63 pass / 0 fail / 1 skip**（skip=Stripe HTTP e2e 无服务器） |
+| `test:commercial` / `test:email` / `test:ai-consent` | ✅ 各 6/6 |
 | `npm run build` | ✅ Compiled successfully，39 页 |
 | `git diff --check` | ✅ CLEAN |
 
-**新测试覆盖**（对应 Step 5 中可离线验证的项）：
-- ✅ 纯 JSON 接受；```` ```json ```` / 裸 ```` ``` ```` fence 接受；前后文字包裹的 JSON 被提取接受。
-- ✅ **invalid JSON 仍被拒**（json 阶段，安全 502）。
-- ✅ **invalid schema 仍被拒**（schema 阶段，含越界数值/非法 enum）。
-- ✅ 空内容不被静默放行。
-- ✅ 源码断言：仍 `response_format: json_object`、仍 Zod、仍抛 `AIProviderOutputError`、无 provider fallback、未放宽 schema、保留 medical safety prompt。
+**新测试覆盖（要求逐项）**：
+- ✅ 顶层数组拒绝；✅ 单元素数组拒绝（含前置 prose）；✅ 嵌套对象通过（保留嵌套）；
+- ✅ 字符串内部大括号通过（`{}` 在字符串值内不破坏平衡）；✅ 多个并列对象拒绝；
+- ✅ 对象后追加第二个对象拒绝；✅ 截断对象拒绝；✅ code fence 对象通过；
+- ✅ prose 包裹单对象通过；✅ invalid schema 拒绝；✅ 空内容拒绝；✅ 纯对象端到端通过。
+- ✅ 源码断言：用 `extractTopLevelJsonObject`+`scanBalancedObjectEnd`（字符串/转义感知）、**已移除 `lastIndexOf`**、仍 `json_object`/`JSON.parse`/Zod、仍抛 `AIProviderOutputError`、无 provider fallback、未放宽 schema、保留 medical safety prompt。
 
 **本地无法覆盖（需生产/真实 DeepSeek）**：DeepSeek 最小调用成功、结构化 JSON 真实成功、`AIUsage.provider=deepseek`/model/tokens/endpoint 真实记录——这些需要 Step 3 探针或生产 smoke（无 key/无 Vercel/无生产库，我无法执行）。
 
