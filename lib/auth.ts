@@ -7,8 +7,23 @@ const cookieName = "gbmedix_session";
 const doctorCookieName = "gbmedix_doctor_session";
 const merchantCookieName = "gbmedix_merchant_session";
 
+// Development-only fallback. Never allowed in production (see secret()).
+const DEV_FALLBACK_SECRET = "dev-only-change-me";
+
 function secret() {
-  return process.env.AUTH_SECRET || "dev-only-change-me";
+  const value = process.env.AUTH_SECRET;
+  if (process.env.NODE_ENV === "production") {
+    // Fail loudly rather than silently signing sessions with a public default.
+    if (!value || value === DEV_FALLBACK_SECRET) {
+      throw new Error(
+        "AUTH_SECRET must be set to a strong, non-default value in production. " +
+          "Refusing to start/sign with the development fallback."
+      );
+    }
+    return value;
+  }
+  // Development / test only: a labeled fallback keeps local runs frictionless.
+  return value || DEV_FALLBACK_SECRET;
 }
 
 function sign(value: string) {
@@ -26,8 +41,20 @@ export function sessionValue(userId: string) {
   return `${userId}.${sign(userId)}`;
 }
 
-export function setSessionCookie(response: NextResponse, userId: string) {
-  response.cookies.set(cookieName, sessionValue(userId), {
+// User sessions bind the id to a sessionVersion so they can be revoked in bulk
+// by bumping User.sessionVersion (see invalidateUserSessions). The signature
+// covers "id.version" so neither can be tampered with independently.
+export function userSessionValue(userId: string, sessionVersion: number) {
+  const payload = `${userId}.${sessionVersion}`;
+  return `${payload}.${sign(payload)}`;
+}
+
+export function setSessionCookie(
+  response: NextResponse,
+  userId: string,
+  sessionVersion: number
+) {
+  response.cookies.set(cookieName, userSessionValue(userId, sessionVersion), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -50,10 +77,33 @@ export async function getCurrentUser() {
   const raw = cookies().get(cookieName)?.value;
   if (!raw) return null;
 
-  const [userId, signature] = raw.split(".");
-  if (!userId || !signature || !verify(userId, signature)) return null;
+  // Format: "userId.sessionVersion.signature" (signature over "userId.sessionVersion").
+  // Legacy 2-part cookies no longer validate and are treated as signed out.
+  const parts = raw.split(".");
+  if (parts.length !== 3) return null;
+  const [userId, versionRaw, signature] = parts;
+  if (!userId || !versionRaw || !signature) return null;
+  if (!verify(`${userId}.${versionRaw}`, signature)) return null;
 
-  return prisma.user.findUnique({ where: { id: userId } });
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) return null;
+
+  // Revocation check: a bumped User.sessionVersion invalidates older cookies.
+  if (user.sessionVersion !== Number(versionRaw)) return null;
+
+  return user;
+}
+
+// Revoke every existing session for a user (logout-all / email or credential
+// change / security response) by advancing their sessionVersion. Any cookie
+// signed with a prior version fails the check in getCurrentUser.
+export async function invalidateUserSessions(userId: string) {
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { sessionVersion: { increment: 1 } },
+    select: { id: true, sessionVersion: true }
+  });
+  return user.sessionVersion;
 }
 
 export function setDoctorSessionCookie(response: NextResponse, doctorId: string) {

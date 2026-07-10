@@ -95,7 +95,7 @@ export async function POST(request: Request) {
     });
 
     const response = NextResponse.json({ url: process.env.ALIPAY_CHECKOUT_URL });
-    if (user) setSessionCookie(response, user.id);
+    if (user) setSessionCookie(response, user.id, user.sessionVersion);
     return response;
   }
 
@@ -158,7 +158,7 @@ export async function POST(request: Request) {
   });
 
   const response = NextResponse.json({ url: session.url });
-  if (user) setSessionCookie(response, user.id);
+  if (user) setSessionCookie(response, user.id, user.sessionVersion);
   return response;
 }
 

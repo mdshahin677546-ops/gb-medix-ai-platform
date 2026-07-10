@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     process.env.NEXT_PUBLIC_APP_URL || request.url
   );
   const response = NextResponse.redirect(redirectUrl);
-  setSessionCookie(response, result.userId);
+  setSessionCookie(response, result.userId, result.sessionVersion);
   return response;
 }
 
@@ -53,7 +53,7 @@ async function verifyToken(token: string) {
   }
 
   const response = NextResponse.json({ ok: true, status: "active" });
-  setSessionCookie(response, result.userId);
+  setSessionCookie(response, result.userId, result.sessionVersion);
   return response;
 }
 
@@ -67,16 +67,21 @@ async function verifyEmail(token: string) {
     return { ok: false as const };
   }
 
-  await prisma.$transaction([
+  const [, updatedUser] = await prisma.$transaction([
     prisma.emailVerification.update({
       where: { id: verification.id },
       data: { verifiedAt: new Date() }
     }),
     prisma.user.update({
       where: { id: verification.userId },
-      data: { status: "active", emailVerifiedAt: new Date() }
+      data: { status: "active", emailVerifiedAt: new Date() },
+      select: { id: true, sessionVersion: true }
     })
   ]);
 
-  return { ok: true as const, userId: verification.userId };
+  return {
+    ok: true as const,
+    userId: verification.userId,
+    sessionVersion: updatedUser.sessionVersion
+  };
 }

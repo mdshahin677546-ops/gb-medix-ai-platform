@@ -43,7 +43,7 @@ test("verify-email route activates user and supports clicked GET links", () => {
   assert.match(source, /searchParams\.get\("token"\)/);
   assert.match(source, /status:\s*"active"/);
   assert.match(source, /emailVerifiedAt:\s*new Date\(\)/);
-  assert.match(source, /setSessionCookie\(response, result\.userId\)/);
+  assert.match(source, /setSessionCookie\(response, result\.userId, result\.sessionVersion\)/);
   assert.match(source, /NextResponse\.redirect/);
 });
 
@@ -59,7 +59,7 @@ test("verified users can continue into assessment flow after session issuance", 
   const verifySource = readFileSync("app/api/auth/verify-email/route.ts", "utf8");
   const tcmSource = readFileSync("app/api/tcm/route.ts", "utf8");
 
-  assert.match(verifySource, /setSessionCookie\(response, result\.userId\)/);
+  assert.match(verifySource, /setSessionCookie\(response, result\.userId, result\.sessionVersion\)/);
   assert.match(tcmSource, /const user = await getCurrentUser\(\)/);
   assert.match(tcmSource, /await recordAIUsage/);
   assert.match(tcmSource, /prisma\.tCMRecord\.create/);

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   clearSessionCookie,
   getCurrentUser,
+  invalidateUserSessions,
   setSessionCookie
 } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -38,11 +39,18 @@ export async function POST(request: Request) {
   const response = NextResponse.json({
     user: { id: user.id, email: user.email, status: user.status }
   });
-  setSessionCookie(response, user.id);
+  setSessionCookie(response, user.id, user.sessionVersion);
   return response;
 }
 
-export async function DELETE() {
+// Logout. `?scope=all` revokes every device by bumping sessionVersion; the
+// default clears only this device's cookie (existing behavior, non-breaking).
+export async function DELETE(request: Request) {
+  const scope = new URL(request.url).searchParams.get("scope");
+  if (scope === "all") {
+    const user = await getCurrentUser();
+    if (user) await invalidateUserSessions(user.id);
+  }
   const response = NextResponse.json({ ok: true });
   clearSessionCookie(response);
   return response;

@@ -38,7 +38,7 @@ npm run build
 Required production variables:
 
 - `DATABASE_URL`
-- `AUTH_SECRET`
+- `AUTH_SECRET` — must be a strong random value (≥32 bytes). In production the app throws if it is missing or left as the dev fallback `dev-only-change-me`. Rotating it invalidates all existing sessions.
 - `NEXT_PUBLIC_APP_URL`
 - `OPENAI_API_KEY`
 - `STRIPE_SECRET_KEY`
