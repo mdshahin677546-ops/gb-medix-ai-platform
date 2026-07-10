@@ -418,3 +418,26 @@ sessions). Account for the following at launch:
   session rotation. Consider noting it in release/support communications.
 - Doctor and merchant sessions are **not** affected by the user `sessionVersion`
   change and do not require re-login.
+
+## DeepSeek Production Switch Checklist
+
+必须逐项确认：
+
+* [ ] Vercel Production 已部署 commit `e069bc2` 或更新版本
+* [ ] `npx prisma migrate status` 显示全部 migrations 已应用
+* [ ] 已执行 `npx prisma migrate deploy`
+* [ ] 生产库存在 `AIUsage.provider`
+* [ ] 生产库存在 `AIProcessingConsent`
+* [ ] 生产库存在 `User.sessionVersion`
+* [ ] `/zh/third-party-ai-privacy` 可访问
+* [ ] `/en/third-party-ai-privacy` 可访问
+* [ ] AI consent UI 已上线，可主动同意和撤回
+* [ ] 负责人已书面批准启用第三方 AI Provider
+* [ ] Vercel 已配置 `AI_PROVIDER`
+* [ ] Vercel 已配置 `DEEPSEEK_API_KEY`
+* [ ] `DEEPSEEK_BASE_URL=https://api.deepseek.com`
+* [ ] 已配置 `DEEPSEEK_MODEL`
+* [ ] 强随机 `AUTH_SECRET` 已配置
+* [ ] Neon、Resend、Stripe 生产配置仍有效
+* [ ] 已准备回退方案：将 `AI_PROVIDER` 切回原 Provider
+* [ ] 已准备生产 Smoke Test
