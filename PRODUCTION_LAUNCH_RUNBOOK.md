@@ -26,6 +26,12 @@ npx prisma migrate deploy
 npx prisma generate
 ```
 
+   - **Required this release (security hardening):** migration
+     `20260710120000_add_user_session_version` adds the `User.sessionVersion`
+     column. `npx prisma migrate deploy` MUST run in production. If it is skipped,
+     the column is missing and `getCurrentUser` / session validation fail at
+     runtime — every authenticated request errors.
+
 5. Build
 
 ```bash
@@ -58,7 +64,10 @@ npm start
 
 - `AUTH_SECRET`
   - Secret used to sign authentication cookies.
-  - Must be a long random production-only value.
+  - Must be a long random production-only value (≥32 bytes).
+  - Enforced: in production the app throws and refuses to run if `AUTH_SECRET` is
+    missing or left as the development fallback `dev-only-change-me`.
+  - Rotating it invalidates all existing sessions (global logout).
 
 - `NEXT_PUBLIC_APP_URL`
   - Public production origin.
@@ -195,6 +204,11 @@ npx prisma migrate status
 npx prisma migrate deploy
 npx prisma generate
 ```
+
+   - This release includes migration `20260710120000_add_user_session_version`,
+     which adds `User.sessionVersion`. Running `npx prisma migrate deploy` is
+     mandatory in production; without it, `getCurrentUser` / session validation
+     fail because the column is missing.
 
 4. Verify schema
 
@@ -350,3 +364,23 @@ Before opening production traffic:
 - Email provider decision accepted.
 - Monitoring plan active.
 - Rollback snapshot available.
+- Strong `AUTH_SECRET` configured (not the `dev-only-change-me` fallback).
+- `User.sessionVersion` migration (`20260710120000_add_user_session_version`) deployed.
+
+## 8. Session Security Hardening Notes (v2)
+
+This release hardens authentication (`AUTH_SECRET` enforcement + revocable
+sessions). Account for the following at launch:
+
+- Production **must** configure a strong random `AUTH_SECRET` (≥32 bytes).
+- If `AUTH_SECRET` is missing or set to `dev-only-change-me`, the app **refuses
+  to run** in production (it throws when signing/verifying sessions).
+- This release adds the `User.sessionVersion` column. Run `npx prisma migrate
+  deploy` in production (migration `20260710120000_add_user_session_version`).
+  Without it, `getCurrentUser` / session validation fail due to the missing
+  column.
+- After deploy, previously issued 2-part user cookies are invalidated; users
+  must sign in once more. This is expected — equivalent to a one-time forced
+  session rotation. Consider noting it in release/support communications.
+- Doctor and merchant sessions are **not** affected by the user `sessionVersion`
+  change and do not require re-login.
