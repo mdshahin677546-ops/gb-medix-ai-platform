@@ -31,8 +31,8 @@ test("verification email includes a clickable token link", () => {
   assert.match(source, /\/api\/auth\/verify-email/);
   assert.match(source, /url\.searchParams\.set\("token", token\)/);
   assert.match(source, /Verify your email:/);
-  assert.match(source, /AI Health Assessment and health management journey/);
-  assert.match(sendRoute, /buildVerificationEmail\(\{ token \}\)/);
+  assert.match(source, /AI Health Assessment continues right where you left it/);
+  assert.match(sendRoute, /buildVerificationEmail\(\{ token, lang \}\)/);
   assert.match(sendRoute, /html:\s*emailMessage\.html/);
 });
 

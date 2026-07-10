@@ -31,8 +31,11 @@ export async function GET(request: Request) {
     );
   }
 
+  // Land the user back on the assessment they came from, in their language.
+  const langParam = new URL(request.url).searchParams.get("lang");
+  const lang = langParam === "zh" ? "zh" : "en";
   const redirectUrl = new URL(
-    "/en/dashboard?verified=1",
+    `/${lang}/tcm-check?verified=1`,
     process.env.NEXT_PUBLIC_APP_URL || request.url
   );
   const response = NextResponse.redirect(redirectUrl);

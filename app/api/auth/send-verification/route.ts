@@ -7,7 +7,8 @@ import { buildVerificationEmail } from "@/lib/email/verification";
 import { prisma } from "@/lib/prisma";
 
 const requestSchema = z.object({
-  email: z.string().email()
+  email: z.string().email(),
+  lang: z.enum(["en", "zh"]).optional()
 });
 
 const perEmailHourlyLimit = 5;
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid email." }, { status: 400 });
   }
-  const { email } = parsed.data;
+  const { email, lang } = parsed.data;
 
   // Per-IP throttle (in-process burst guard).
   const ip = clientIp(request);
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
     data: { userId: user.id, email, token, expiresAt }
   });
 
-  const emailMessage = buildVerificationEmail({ token });
+  const emailMessage = buildVerificationEmail({ token, lang });
   await getEmailProvider().send({
     to: email,
     subject: emailMessage.subject,

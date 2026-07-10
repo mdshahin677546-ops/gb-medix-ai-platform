@@ -16,8 +16,7 @@ const shellCopy = {
     account: "Account",
     console: "AI health management",
     status: "System status: Normal",
-    ops: "AI Health Center",
-    search: "Search reports, plans, and wellness products..."
+    ops: "AI Health Center"
   },
   zh: {
     dashboard: "\u6570\u636e\u770b\u677f",
@@ -30,8 +29,7 @@ const shellCopy = {
     account: "\u8d26\u6237",
     console: "AI \u5065\u5eb7\u7ba1\u7406",
     status: "\u7cfb\u7edf\u72b6\u6001\uff1a\u6b63\u5e38",
-    ops: "AI \u5065\u5eb7\u4e2d\u5fc3",
-    search: "\u641c\u7d22\u62a5\u544a\u3001\u65b9\u6848\u548c\u5065\u5eb7\u4ea7\u54c1..."
+    ops: "AI \u5065\u5eb7\u4e2d\u5fc3"
   }
 };
 
@@ -58,7 +56,7 @@ export function Shell({
     <main className="ambient-grid min-h-screen overflow-x-hidden">
       <div className="signal-strip fixed inset-x-0 top-0 z-40" />
       <div className="grid min-h-screen lg:grid-cols-[260px_1fr]">
-        <aside className="hidden border-r border-white/10 bg-[#030914]/90 backdrop-blur-xl lg:block">
+        <aside className="hidden border-r border-white/10 bg-[#030914]/90 backdrop-blur-xl print:hidden lg:block">
           <div className="flex h-full flex-col px-4 py-6">
             <Link
               href={`/${lang}/dashboard`}
@@ -82,7 +80,7 @@ export function Shell({
         </aside>
 
         <div className="min-w-0">
-          <header className="sticky top-0 z-30 border-b border-white/10 bg-[#06111d]/80 backdrop-blur-xl">
+          <header className="sticky top-0 z-30 border-b border-white/10 bg-[#06111d]/80 backdrop-blur-xl print:hidden">
             <nav className="flex items-center justify-between gap-4 px-5 py-4">
               <Link
                 href={`/${lang}/assistant`}
@@ -97,14 +95,6 @@ export function Shell({
                 <span className="text-white/20">|</span>
                 <span>{text.ops}</span>
               </div>
-
-              <input
-                type="search"
-                disabled
-                aria-label={text.search}
-                placeholder={text.search}
-                className="hidden min-w-[320px] cursor-not-allowed rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm text-ink placeholder:text-ink/55 md:block"
-              />
 
               <div className="flex items-center gap-3 text-sm text-ink/70">
                 <span className="rounded-md border border-mint/20 bg-mint/10 px-3 py-2 text-mint">
@@ -124,7 +114,7 @@ export function Shell({
           <section className="mx-auto max-w-[1500px] px-5 py-6 sm:py-8">
             {children}
           </section>
-          <p className="px-5 pb-8 text-xs text-ink/60 lg:hidden">
+          <p className="px-5 pb-8 text-xs text-ink/60 print:hidden lg:hidden">
             {copy[lang].disclaimer}
           </p>
         </div>

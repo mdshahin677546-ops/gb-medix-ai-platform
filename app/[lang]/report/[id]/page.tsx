@@ -10,6 +10,7 @@ import {
 import { getLang } from "@/lib/lang";
 import { prisma } from "@/lib/prisma";
 import { PremiumGenerateButton, PremiumUnlockButton } from "./premium-actions";
+import { PrintButton } from "./print-button";
 
 export default async function ReportPage({
   params
@@ -99,9 +100,10 @@ export default async function ReportPage({
                 AI Health Assessment
               </h1>
               <p className="mt-4 leading-7 text-ink/75">{report.summary}</p>
-              <div className="mt-5 flex flex-wrap gap-2 text-sm">
+              <div className="mt-5 flex flex-wrap items-center gap-2 text-sm">
                 <Badge label="Constitution" value={String(analysis.constitution || "Wellness pattern")} />
                 <Badge label="Status" value={report.status} />
+                <PrintButton label={lang === "zh" ? "打印 / 保存 PDF" : "Print / Save as PDF"} />
               </div>
             </div>
             <ScoreDial score={report.score} />
@@ -129,6 +131,28 @@ export default async function ReportPage({
               follow-up planning, and wellness product recommendations connected to this
               assessment.
             </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="font-mono text-xs uppercase tracking-wide text-ink/60">
+                  Free result — included
+                </p>
+                <ul className="mt-2 grid gap-1.5 text-sm text-ink/75">
+                  <li>Health score and constitution pattern</li>
+                  <li>Basic insights</li>
+                  <li>Starter suggestions</li>
+                </ul>
+              </div>
+              <div className="rounded-lg border border-mint/25 bg-mint/[0.06] p-4">
+                <p className="font-mono text-xs uppercase tracking-wide text-mint">
+                  Premium — $9.99 one-time
+                </p>
+                <ul className="mt-2 grid gap-1.5 text-sm text-ink/75">
+                  <li>Full lifestyle guidance plan</li>
+                  <li>Product recommendations matched to your pattern</li>
+                  <li>Numbered follow-up plan</li>
+                </ul>
+              </div>
+            </div>
             <p className="mt-3 text-sm text-ink/60">
               This platform provides AI wellness education and health management support.
               It is not a medical diagnosis, treatment plan, emergency service, or

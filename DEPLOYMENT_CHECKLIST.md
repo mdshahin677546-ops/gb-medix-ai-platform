@@ -177,3 +177,9 @@ No-go criteria:
 - Migration duplicate conflict unresolved.
 - Stripe webhook delivery failing.
 - Email verification flow does not activate a test user.
+
+
+## 字体构建依赖(next/font)
+
+- `app/layout.tsx` 使用 `next/font/google`(Inter / Space Grotesk / IBM Plex Mono),`next build` 时需要访问 Google Fonts。
+- 若构建环境(如 Aliyun)无法访问 Google Fonts:下载 woff2 字体文件放入仓库,改用 `next/font/local`,其余代码不变。
