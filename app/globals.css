@@ -427,6 +427,42 @@ textarea {
   }
 }
 
+/* Print: reports become plain black-on-white documents. */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+
+  .ambient-grid::before,
+  .ambient-grid::after,
+  .signal-strip,
+  .scanner-line,
+  .product-scan {
+    display: none !important;
+  }
+
+  .glass-panel,
+  .dark-panel,
+  .metric-tile,
+  main header,
+  main section {
+    background: #ffffff !important;
+    border-color: #d1d5db !important;
+    box-shadow: none !important;
+  }
+
+  main h1,
+  main h2,
+  main h3,
+  main p,
+  main li,
+  main span {
+    color: #111827 !important;
+    text-shadow: none !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scanner-line,
   .product-card,

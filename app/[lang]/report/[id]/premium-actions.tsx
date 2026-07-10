@@ -43,8 +43,9 @@ export function PremiumUnlockButton({
         disabled={loading}
         className="rounded-md bg-clay px-5 py-3 font-medium text-[#03101c] transition hover:brightness-110 disabled:opacity-60"
       >
-        {loading ? "Opening Stripe..." : "Unlock Premium Report"}
+        {loading ? "Opening Stripe..." : "Unlock Premium Report · $9.99"}
       </button>
+      <p className="text-xs text-ink/60">One-time payment. Access is tied to this assessment.</p>
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
     </div>
   );
@@ -87,6 +88,12 @@ export function PremiumGenerateButton({
       >
         {loading ? "Generating..." : "Generate Premium Report"}
       </button>
+      {loading ? (
+        <p className="text-sm text-ink/60">
+          About 20 seconds — the AI is building your full lifestyle, product, and
+          follow-up plan.
+        </p>
+      ) : null}
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
     </div>
   );

@@ -81,6 +81,15 @@ export function TCMCheckForm({
   useEffect(() => {
     refreshSession();
     fetchConsent();
+    // Coming back from the verification email link: confirm success in place.
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("verified") === "1") {
+      setGateNotice(
+        lang === "zh"
+          ? "邮箱验证成功,可以开始健康评估了。"
+          : "Email verified. You can start the health assessment."
+      );
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -89,6 +98,53 @@ export function TCMCheckForm({
   const consentAccepted = Boolean(consentStatus?.required && consentStatus.accepted);
   const submitDisabled =
     loading || sessionLoading || !accountReady || consentStatusLoading || consentRequired;
+
+  // While waiting for the email click, poll so the gate opens by itself.
+  useEffect(() => {
+    if (sessionLoading || !sessionUser || accountReady) return;
+    const timer = setInterval(async () => {
+      const user = await refreshSession();
+      if (user?.status === "active") {
+        fetchConsent();
+        setGateNotice(
+          lang === "zh"
+            ? "邮箱已验证,现在可以开始健康评估。"
+            : "Email verified. You can start the health assessment now."
+        );
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionLoading, sessionUser?.email, accountReady]);
+
+  const analyzeStages =
+    lang === "zh"
+      ? [
+          "正在解析你的睡眠与作息信号...",
+          "正在匹配体质模式...",
+          "正在生成健康管理建议...",
+          "正在整理你的报告..."
+        ]
+      : [
+          "Reading your sleep and rhythm signals...",
+          "Matching constitution patterns...",
+          "Drafting health management guidance...",
+          "Assembling your report..."
+        ];
+  const [stageIndex, setStageIndex] = useState(0);
+
+  useEffect(() => {
+    if (!loading) {
+      setStageIndex(0);
+      return;
+    }
+    const timer = setInterval(
+      () => setStageIndex((index) => (index + 1) % analyzeStages.length),
+      4000
+    );
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   async function startVerification() {
     const email = (sessionUser?.email || gateEmail).trim();
@@ -114,7 +170,7 @@ export function TCMCheckForm({
     const sent = await fetch("/api/auth/send-verification", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email })
+      body: JSON.stringify({ email, lang })
     });
     const data = await sent.json().catch(() => ({}));
     setGateBusy(false);
@@ -344,6 +400,12 @@ export function TCMCheckForm({
         />
       </section>
 
+      {accountReady && gateNotice ? (
+        <p className="rounded-md border border-leaf/20 bg-leaf/10 px-4 py-3 text-sm font-medium text-leaf">
+          {gateNotice}
+        </p>
+      ) : null}
+
       {!sessionLoading && !accountReady ? (
         <section className="rounded-md border border-mint/25 bg-mint/[0.06] p-4 text-sm text-ink">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-mint">
@@ -571,6 +633,17 @@ export function TCMCheckForm({
         </div>
       </div>
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
+      {loading ? (
+        <div className="rounded-md border border-mint/20 bg-mint/[0.06] px-4 py-3 text-sm">
+          <p className="font-medium text-mint">
+            {lang === "zh" ? "AI 正在分析,约需 20 秒" : "AI is analyzing — about 20 seconds"}
+          </p>
+          <p className="mt-1 flex items-center gap-2 text-ink/70">
+            <span className="signal-meter h-2 w-2 rounded-full bg-mint" />
+            {analyzeStages[stageIndex]}
+          </p>
+        </div>
+      ) : null}
       {submitDisabled && !loading ? (
         <p className="text-sm text-ink/55">
           {sessionLoading || consentStatusLoading
