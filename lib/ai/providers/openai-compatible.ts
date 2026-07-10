@@ -90,9 +90,13 @@ export class OpenAICompatibleProvider implements AIProvider {
     });
 
     const content = completion.choices[0]?.message.content || "";
+    // Some OpenAI-compatible providers (e.g. DeepSeek) may wrap the JSON in a
+    // markdown code fence or add surrounding prose even in json_object mode.
+    // Extract the JSON object defensively, then STILL require strict JSON +
+    // schema validation. Invalid output throws (safe 502) and is never stored.
     let rawJson: unknown;
     try {
-      rawJson = JSON.parse(content);
+      rawJson = JSON.parse(extractJsonObject(content));
     } catch {
       throw new AIProviderOutputError("AI report output was not valid JSON.");
     }
@@ -110,6 +114,25 @@ export class OpenAICompatibleProvider implements AIProvider {
       model: this.model
     };
   }
+}
+
+/**
+ * Extract a JSON object string from a model response that may be wrapped in a
+ * markdown code fence (```json ... ```) or surrounded by prose. This does NOT
+ * relax validation: the caller still runs JSON.parse + Zod safeParse, so any
+ * non-JSON or schema-invalid output is rejected with a safe error. When no
+ * object boundary is found, the trimmed input is returned unchanged so the
+ * subsequent JSON.parse fails and a safe 502 is raised.
+ */
+export function extractJsonObject(text: string): string {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  const body = (fenced ? fenced[1] : trimmed).trim();
+  if (body.startsWith("{") && body.endsWith("}")) return body;
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  if (start !== -1 && end > start) return body.slice(start, end + 1);
+  return body;
 }
 
 function normalizeUsage(usage?: {

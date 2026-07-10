@@ -32,7 +32,9 @@ test("structured provider output keeps JSON parsing and Zod validation gates", (
   const source = read("lib/ai/providers/openai-compatible.ts");
 
   assert.match(source, /response_format:\s*\{\s*type:\s*"json_object"\s*\}/);
-  assert.match(source, /JSON\.parse\(content\)/);
+  // JSON parsing gate is preserved; content is defensively unwrapped first
+  // (markdown fences / prose) but still strictly JSON.parse'd + Zod-validated.
+  assert.match(source, /JSON\.parse\(extractJsonObject\(content\)\)/);
   assert.match(source, /schema\.safeParse\(rawJson\)/);
   assert.match(source, /AI report output was not valid JSON\./);
   assert.match(source, /AI report output failed schema validation\./);
