@@ -179,3 +179,56 @@ Required before enabling `AI_PROVIDER=deepseek`:
 Conclusion:
 
 DEEPSEEK_PRODUCTION_PREFLIGHT_BLOCKED
+
+## 8. Review Revisions (post-audit)
+
+Reviewer note: the BLOCKED conclusion is confirmed correct. Three corrections
+apply because this audit was anchored to commit `1b467d9`, and `main` has since
+advanced to `ca2defd`.
+
+### 8.1 Correction to Section 4 (privacy notice) — evidence was stale
+
+Section 4 checked `/THIRD_PARTY_AI_PRIVACY_NOTICE.md` and
+`/third-party-ai-privacy-notice` (both 404). Those are the wrong targets. The
+accessible privacy notice **page** now exists at:
+
+- `app/[lang]/third-party-ai-privacy/page.tsx` (added in commit `7b372d2`,
+  after this audit's `1b467d9` baseline), reachable at
+  `/{lang}/third-party-ai-privacy` and linked from the tcm-check consent UI and
+  the dashboard consent manager.
+
+So the notice is resolved in code. The remaining action is a deploy, not
+authoring: production is still on `1b467d9`, which predates the page. Redeploy
+`main` (`ca2defd`) and re-check `/{lang}/third-party-ai-privacy` returns 200.
+
+### 8.2 Addition to Section 7 smoke test — negative consent assertions (required)
+
+The smoke test in Section 7 only covers the accepted-consent happy path. It must
+also verify the gate actually blocks, which is the core of the C-1 requirement:
+
+- With `AI_PROVIDER=deepseek`, an unconsented user calling an AI route
+  (`/api/tcm`, `/api/reports/generate`, `/api/assistant`, `/api/consult`) must
+  receive **403** and no provider call is made.
+- After accepting consent, the same call proceeds.
+- After revoking consent from the dashboard, the call returns **403** again.
+
+### 8.3 Rollback switch
+
+If DeepSeek causes JSON instability or an outage after switch, roll back
+config-only (no redeploy, no auto-fallback in v1):
+
+- Set `AI_PROVIDER=openai` in Vercel Production (requires `OPENAI_API_KEY` set).
+
+### 8.4 Updated required steps before enabling `AI_PROVIDER=deepseek`
+
+1. Run `prisma migrate deploy` on production PostgreSQL (includes
+   `20260709130000_ai_processing_consent`) and confirm `AIProcessingConsent`
+   exists.
+2. Redeploy `main` (`ca2defd`) and confirm `/{lang}/third-party-ai-privacy`
+   returns 200.
+3. Configure and verify Vercel Production env vars: `AI_PROVIDER=deepseek`,
+   `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL=https://api.deepseek.com`,
+   `DEEPSEEK_MODEL`.
+4. Production smoke: happy path + negative consent (unconsented and revoked →
+   403) + confirm `AIUsage.provider = deepseek`.
+5. Confirm the rollback switch (`AI_PROVIDER=openai`) is ready.
