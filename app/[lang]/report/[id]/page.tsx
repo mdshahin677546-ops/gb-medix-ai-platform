@@ -24,7 +24,7 @@ export default async function ReportPage({
       <Shell lang={lang}>
         <Panel title="Sign in required">
           <p>Please sign in to view your AI health assessment result.</p>
-          <Link className="mt-4 inline-flex rounded-md bg-leaf px-5 py-3 text-white" href={`/${lang}/account`}>
+          <Link className="mt-4 inline-flex rounded-md bg-leaf px-5 py-3 font-medium text-[#03101c] transition hover:brightness-110" href={`/${lang}/account`}>
             Go to account
           </Link>
         </Panel>
@@ -84,18 +84,29 @@ export default async function ReportPage({
   return (
     <Shell lang={lang}>
       <div className="grid gap-5">
-        <div className="rounded-md border border-white/10 bg-mist/85 p-5 text-ink">
-          <p className="text-sm font-semibold text-leaf">
-            {report.type === "premium_health_report" ? "Premium AI Health Report" : "Free AI Health Result"}
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold">AI Health Assessment</h1>
-          <p className="mt-3 text-ink/70">{report.summary}</p>
-          <div className="mt-5 flex flex-wrap gap-3 text-sm">
-            <Badge label="Health score" value={`${report.score}/100`} />
-            <Badge label="Constitution" value={String(analysis.constitution || "Wellness pattern")} />
-            <Badge label="Status" value={report.status} />
+        <header className="dark-panel relative overflow-hidden p-6 text-ink sm:p-8">
+          {report.type === "premium_health_report" ? (
+            <div className="signal-strip absolute inset-x-0 top-0" />
+          ) : null}
+          <div className="flex flex-wrap items-end justify-between gap-8">
+            <div className="max-w-2xl">
+              <p className="font-mono text-xs font-semibold uppercase tracking-[0.22em] text-mint">
+                {report.type === "premium_health_report"
+                  ? "Premium AI Health Report"
+                  : "Free AI Health Result"}
+              </p>
+              <h1 className="mt-3 text-4xl font-semibold text-white">
+                AI Health Assessment
+              </h1>
+              <p className="mt-4 leading-7 text-ink/75">{report.summary}</p>
+              <div className="mt-5 flex flex-wrap gap-2 text-sm">
+                <Badge label="Constitution" value={String(analysis.constitution || "Wellness pattern")} />
+                <Badge label="Status" value={report.status} />
+              </div>
+            </div>
+            <ScoreDial score={report.score} />
           </div>
-        </div>
+        </header>
 
         <Panel title="Basic insights">
           <StringList
@@ -112,7 +123,7 @@ export default async function ReportPage({
         </Panel>
 
         {report.type === "free_health_report" ? (
-          <Panel title="Premium report">
+          <Panel accent title="Premium report">
             <p>
               Unlock the full AI health management report for deeper lifestyle guidance,
               follow-up planning, and wellness product recommendations connected to this
@@ -151,7 +162,7 @@ export default async function ReportPage({
               />
             </Panel>
             <Panel title="Follow-up plan">
-              <StringList items={followUpPlan} />
+              <StringList ordered items={followUpPlan} />
             </Panel>
           </>
         )}
@@ -211,16 +222,53 @@ function normalizeProductSuggestions(value: unknown) {
   });
 }
 
+function ScoreDial({ score }: { score: number }) {
+  const clamped = Math.max(0, Math.min(100, score));
+  return (
+    <div className="min-w-[190px]">
+      <p className="font-mono text-xs uppercase tracking-[0.18em] text-ink/60">
+        Health score
+      </p>
+      <p className="mt-2 flex items-baseline gap-1">
+        <span className="font-mono text-6xl font-semibold leading-none text-white">
+          {clamped}
+        </span>
+        <span className="font-mono text-sm text-ink/60">/100</span>
+      </p>
+      <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-leaf to-[#0b7cff]"
+          style={{ width: `${clamped}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function Panel({
   title,
+  accent = false,
   children
 }: {
   title: string;
+  accent?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-md border border-white/10 bg-mist/85 p-5 text-ink">
-      <h2 className="text-xl font-semibold">{title}</h2>
+    <section
+      className={
+        accent
+          ? "rounded-xl border border-mint/25 bg-gradient-to-b from-mint/[0.07] to-mist/85 p-5 text-ink sm:p-6"
+          : "rounded-xl border border-white/10 bg-mist/85 p-5 text-ink sm:p-6"
+      }
+    >
+      <h2 className="flex items-center gap-3 text-lg font-semibold text-white">
+        <span
+          aria-hidden
+          className="h-4 w-1 shrink-0 rounded-full bg-gradient-to-b from-mint to-[#0b7cff]"
+        />
+        {title}
+      </h2>
       <div className="mt-3 text-ink/75">{children}</div>
     </section>
   );
@@ -228,19 +276,36 @@ function Panel({
 
 function Badge({ label, value }: { label: string; value: string }) {
   return (
-    <span className="rounded-md border border-white/10 bg-ink/5 px-3 py-2">
-      <span className="text-ink/60">{label}: </span>
-      <span className="font-medium">{value}</span>
+    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
+      <span className="text-ink/60">{label}</span>
+      <span className="font-medium text-ink">{value}</span>
     </span>
   );
 }
 
-function StringList({ items }: { items: string[] }) {
+function StringList({ items, ordered = false }: { items: string[]; ordered?: boolean }) {
   if (!items.length) return <p>No guidance is available yet.</p>;
+  if (ordered) {
+    return (
+      <ol className="grid gap-3">
+        {items.map((item, index) => (
+          <li key={item} className="flex gap-3">
+            <span className="font-mono text-sm leading-6 text-mint/80">
+              {String(index + 1).padStart(2, "0")}
+            </span>
+            <span className="leading-6">{item}</span>
+          </li>
+        ))}
+      </ol>
+    );
+  }
   return (
-    <ul className="grid gap-2">
+    <ul className="grid gap-2.5">
       {items.map((item) => (
-        <li key={item}>{item}</li>
+        <li key={item} className="flex gap-3">
+          <span aria-hidden className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-mint/70" />
+          <span className="leading-6">{item}</span>
+        </li>
       ))}
     </ul>
   );
@@ -255,9 +320,11 @@ function RecommendationList({
   return (
     <ul className="grid gap-3">
       {items.map((item) => (
-        <li key={`${item.category}-${item.content}`}>
-          <span className="font-medium">{item.category}: </span>
-          {item.content}
+        <li key={`${item.category}-${item.content}`} className="flex flex-wrap items-start gap-3">
+          <span className="mt-0.5 rounded-full border border-mint/25 bg-mint/10 px-2.5 py-0.5 font-mono text-xs uppercase tracking-wide text-mint">
+            {item.category}
+          </span>
+          <p className="min-w-0 flex-1 leading-6">{item.content}</p>
         </li>
       ))}
     </ul>
@@ -271,12 +338,19 @@ function ProductList({
 }) {
   if (!items.length) return <p>Recommendations will appear after Premium generation.</p>;
   return (
-    <ul className="grid gap-3">
+    <ul className="grid gap-3 sm:grid-cols-2">
       {items.map((item) => (
-        <li key={`${item.category}-${item.title}`} className="rounded-md border border-white/10 p-3">
-          <p className="font-medium">{item.productName || item.title}</p>
-          <p className="mt-1 text-sm text-ink/60">{item.category}</p>
-          <p className="mt-2">{item.reason}</p>
+        <li
+          key={`${item.category}-${item.title}`}
+          className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-medium text-white">{item.productName || item.title}</p>
+            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 font-mono text-xs uppercase tracking-wide text-ink/60">
+              {item.category}
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-ink/75">{item.reason}</p>
         </li>
       ))}
     </ul>
