@@ -43,7 +43,7 @@ export function AppNav({
           >
             <span>{item.label}</span>
             {item.sublabel ? (
-              <span className="ml-2 text-xs text-ink/40">{item.sublabel}</span>
+              <span className="ml-2 text-xs text-ink/60">{item.sublabel}</span>
             ) : null}
           </Link>
         );

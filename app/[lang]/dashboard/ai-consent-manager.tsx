@@ -75,7 +75,7 @@ export function AIConsentManager({
         <StatusPill label="Version" value={status.consentVersion} active />
       </div>
       {status.acceptedAt ? (
-        <p className="mt-3 text-xs text-ink/50">Accepted at: {status.acceptedAt}</p>
+        <p className="mt-3 text-xs text-ink/60">Accepted at: {status.acceptedAt}</p>
       ) : null}
       {status.required && status.accepted ? (
         <p className="mt-4 rounded-md border border-amber/20 bg-amber/10 px-3 py-2 text-sm text-ink/65">
@@ -89,7 +89,7 @@ export function AIConsentManager({
           type="button"
           onClick={revoke}
           disabled={loading}
-          className="mt-4 rounded-md border border-red-300/40 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+          className="mt-4 rounded-md border border-red-300/40 px-4 py-2 text-sm font-medium text-red-400 transition hover:bg-red-500/100/10 disabled:opacity-60"
         >
           {loading ? "Updating..." : lang === "zh" ? "\u64a4\u56de\u540c\u610f" : "Revoke consent"}
         </button>
@@ -110,9 +110,9 @@ function StatusPill({
 }) {
   return (
     <div className="rounded-md border border-white/10 bg-white/[0.04] px-3 py-2">
-      <p className="text-xs uppercase tracking-[0.12em] text-ink/40">{label}</p>
+      <p className="text-xs uppercase tracking-[0.12em] text-ink/60">{label}</p>
       <p className="mt-1 flex items-center gap-2 font-medium text-ink">
-        <span className={active ? "h-2 w-2 rounded-full bg-leaf" : "h-2 w-2 rounded-full bg-white/25"} />
+        <span className={active ? "h-2 w-2 rounded-full bg-leaf" : "h-2 w-2 rounded-full bg-white/20"} />
         {value}
       </p>
     </div>

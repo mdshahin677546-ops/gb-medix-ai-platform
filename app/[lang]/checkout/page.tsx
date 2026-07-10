@@ -17,7 +17,7 @@ export default function CheckoutPage({
 
   return (
     <Shell lang={lang}>
-      <div className="max-w-xl rounded-md border border-black/10 bg-white p-6">
+      <div className="max-w-xl rounded-md border border-white/10 bg-mist/85 p-6">
         <h1 className="text-3xl font-semibold text-ink">
           Premium AI Health Management Report
         </h1>

@@ -18,7 +18,7 @@ export default async function MerchantDashboardPage() {
   });
 
   return (
-    <main className="command-shell ambient-grid min-h-screen px-5 py-6">
+    <main className="ambient-grid min-h-screen px-5 py-6">
       <section className="mx-auto grid max-w-[1400px] gap-5">
         <header className="glass-panel rounded-md p-5">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -58,7 +58,7 @@ export default async function MerchantDashboardPage() {
               <p className="font-semibold text-mint">{merchant.email}</p>
               <p className="mt-2">{merchant.contactName}</p>
               <p className="mt-1">{merchant.country}</p>
-              <p className="mt-3 text-xs text-ink/45">Status: {merchant.status}</p>
+              <p className="mt-3 text-xs text-ink/60">Status: {merchant.status}</p>
             </div>
           </div>
         </header>

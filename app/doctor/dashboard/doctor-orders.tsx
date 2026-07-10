@@ -55,20 +55,20 @@ export function DoctorOrders() {
           Switch doctor
         </a>
       </div>
-      {error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="rounded-md bg-red-500/10 p-3 text-sm text-red-400">{error}</p> : null}
       {orders.length ? (
         orders.map((order) => (
           <article key={order.id} className="glass-panel rounded-md p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.14em] text-ink/45">
+                <p className="text-xs uppercase tracking-[0.14em] text-ink/60">
                   {order.userEmail}
                 </p>
                 <h2 className="mt-2 text-xl font-semibold text-ink">
                   {order.question}
                 </h2>
               </div>
-              <span className="rounded-md bg-white/70 px-3 py-2 text-xs font-medium text-ink">
+              <span className="rounded-md bg-white/5 px-3 py-2 text-xs font-medium text-ink">
                 {order.mine ? "My case" : order.status}
               </span>
             </div>

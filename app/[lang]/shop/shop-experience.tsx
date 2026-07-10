@@ -121,7 +121,7 @@ export function ShopExperience({
                     style={{ width: value.includes("%") ? value : "72%" }}
                   />
                 </div>
-                <p className="mt-2 text-xs text-ink/45">{note}</p>
+                <p className="mt-2 text-xs text-ink/60">{note}</p>
               </div>
             ))}
           </div>
@@ -187,7 +187,7 @@ export function ShopExperience({
               <div className="grid gap-4 p-4">
                 <div>
                   <h2 className="text-lg font-semibold text-ink">{product.zhName}</h2>
-                  <p className="mt-1 text-sm text-ink/50">{product.name}</p>
+                  <p className="mt-1 text-sm text-ink/60">{product.name}</p>
                   <p className="mt-3 text-sm leading-6 text-ink/65">
                     {product.description}
                   </p>
@@ -195,15 +195,15 @@ export function ShopExperience({
 
                 <div className="grid grid-cols-3 gap-2 text-xs">
                   <div className="rounded-md border border-white/10 bg-white/5 p-2">
-                    <p className="text-ink/45">AI Match</p>
+                    <p className="text-ink/60">AI Match</p>
                     <p className="mt-1 font-semibold text-mint">{product.match}%</p>
                   </div>
                   <div className="rounded-md border border-white/10 bg-white/5 p-2">
-                    <p className="text-ink/45">Stock</p>
+                    <p className="text-ink/60">Stock</p>
                     <p className="mt-1 font-semibold text-ink">{product.stock}</p>
                   </div>
                   <div className="rounded-md border border-white/10 bg-white/5 p-2">
-                    <p className="text-ink/45">From</p>
+                    <p className="text-ink/60">From</p>
                     <p className="mt-1 font-semibold text-amber">{product.price}</p>
                   </div>
                 </div>

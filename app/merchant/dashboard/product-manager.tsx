@@ -154,7 +154,7 @@ export function MerchantProductManager({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="font-semibold text-ink">{product.name}</h3>
-                    <p className="mt-1 text-sm text-ink/50">{product.category}</p>
+                    <p className="mt-1 text-sm text-ink/60">{product.category}</p>
                   </div>
                   <span className="rounded-md border border-white/10 px-3 py-1 text-xs text-ink/60">
                     {product.status}

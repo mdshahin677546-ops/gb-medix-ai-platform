@@ -4,7 +4,7 @@ import { MerchantLoginForm } from "./merchant-login-form";
 
 export default function MerchantLoginPage() {
   return (
-    <main className="command-shell ambient-grid min-h-screen px-5 py-8">
+    <main className="ambient-grid min-h-screen px-5 py-8">
       <section className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl items-center gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <div>
           <GBLogo />

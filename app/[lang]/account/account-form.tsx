@@ -46,7 +46,7 @@ export function AccountForm({ lang }: { lang: Lang }) {
   return (
     <div className="mt-5 grid gap-4">
       {currentEmail ? (
-        <div className="rounded-md border border-leaf/20 bg-white/70 p-4 shadow-sm">
+        <div className="rounded-md border border-leaf/20 bg-white/5 p-4 shadow-sm">
           <p className="text-sm text-ink/65">
             {lang === "zh" ? "\u5f53\u524d\u90ae\u7bb1" : "Current email"}
           </p>
@@ -54,13 +54,13 @@ export function AccountForm({ lang }: { lang: Lang }) {
           <div className="mt-4 flex flex-wrap gap-3">
             <button
               onClick={() => router.push(`/${lang}/tcm-check`)}
-              className="rounded-md bg-leaf px-4 py-2 text-sm font-medium text-white transition hover:bg-ink"
+              className="rounded-md bg-leaf px-4 py-2 text-sm font-medium text-[#03101c] transition hover:brightness-110"
             >
               {lang === "zh" ? "\u7ee7\u7eed\u5065\u5eb7\u8bc4\u4f30" : "Continue assessment"}
             </button>
             <button
               onClick={logout}
-              className="rounded-md border border-black/10 bg-white/75 px-4 py-2 text-sm transition hover:border-leaf"
+              className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm transition hover:border-leaf"
             >
               {lang === "zh" ? "\u9000\u51fa" : "Sign out"}
             </button>

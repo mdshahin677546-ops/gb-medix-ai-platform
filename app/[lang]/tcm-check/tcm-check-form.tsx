@@ -211,7 +211,7 @@ export function TCMCheckForm({
                 {lang === "zh" ? "\u7b2c\u4e09\u65b9 AI \u5904\u7406\u544a\u77e5" : "Third-party AI processing notice"}
               </h2>
             </div>
-            <span className="rounded-md border border-amber/30 bg-white/45 px-3 py-1 text-xs font-medium text-ink">
+            <span className="rounded-md border border-amber/30 bg-white/[0.04] px-3 py-1 text-xs font-medium text-ink">
               {consentStatus?.provider}
             </span>
           </div>
@@ -220,7 +220,7 @@ export function TCMCheckForm({
               ? "\u6211\u540c\u610f GB Medix \u4f7f\u7528\u7b2c\u4e09\u65b9 AI \u670d\u52a1\u5904\u7406\u6211\u63d0\u4ea4\u7684\u5065\u5eb7\u8bc4\u4f30\u4fe1\u606f\uff0c\u7528\u4e8e\u751f\u6210\u5065\u5eb7\u7ba1\u7406\u5efa\u8bae\u3002\u6211\u7406\u89e3\u8be5\u670d\u52a1\u4e0d\u6784\u6210\u533b\u7597\u8bca\u65ad\u3001\u6cbb\u7597\u6216\u5904\u65b9\u3002"
               : "I agree that GB Medix may use third-party AI services to process the health assessment information I submit in order to generate health management guidance. I understand this service does not provide medical diagnosis, treatment, or prescriptions."}
           </p>
-          <label className="mt-4 flex items-start gap-3 rounded-md border border-amber/20 bg-white/45 p-3 text-sm text-ink/75">
+          <label className="mt-4 flex items-start gap-3 rounded-md border border-amber/20 bg-white/[0.04] p-3 text-sm text-ink/75">
             <input
               type="checkbox"
               checked={consentChecked}
@@ -237,7 +237,7 @@ export function TCMCheckForm({
             type="button"
             onClick={acceptConsent}
             disabled={!consentChecked || consentLoading}
-            className="mt-4 rounded-md bg-leaf px-4 py-2 font-medium text-white transition hover:bg-ink disabled:opacity-60"
+            className="mt-4 rounded-md bg-leaf px-4 py-2 font-medium text-[#03101c] transition hover:brightness-110 disabled:opacity-60"
           >
             {consentLoading
               ? lang === "zh"
@@ -343,7 +343,7 @@ export function TCMCheckForm({
           ) : null}
         </div>
       </div>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="text-sm text-red-400">{error}</p> : null}
       {submitDisabled && !loading ? (
         <p className="text-sm text-ink/55">
           {consentStatusLoading
@@ -396,7 +396,7 @@ function FlowStep({
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mint/70">{label}</p>
       <p className="mt-1 font-semibold text-ink">{title}</p>
       <p className="mt-1 flex items-center gap-2 text-xs text-ink/55">
-        <span className={done ? "h-2 w-2 rounded-full bg-leaf" : "h-2 w-2 rounded-full bg-white/25"} />
+        <span className={done ? "h-2 w-2 rounded-full bg-leaf" : "h-2 w-2 rounded-full bg-white/20"} />
         {detail}
       </p>
     </div>

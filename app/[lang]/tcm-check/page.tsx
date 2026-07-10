@@ -170,13 +170,13 @@ function CheckboxGroup({
   items: string[];
 }) {
   return (
-    <fieldset className="rounded-md border border-black/10 bg-white/45 p-4">
+    <fieldset className="rounded-md border border-white/10 bg-white/[0.04] p-4">
       <legend className="px-1 text-sm font-semibold text-ink">{label}</legend>
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((item) => (
           <label
             key={item}
-            className="flex items-center gap-2 rounded-md border border-black/10 bg-white/70 px-3 py-2 text-sm text-ink/75 transition hover:border-leaf"
+            className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-ink/75 transition hover:border-leaf"
           >
             <input name={name} value={item} type="checkbox" className="accent-leaf" />
             <span>{item}</span>

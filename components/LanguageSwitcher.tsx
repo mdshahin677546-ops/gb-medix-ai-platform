@@ -20,7 +20,7 @@ export function LanguageSwitcher({ lang }: { lang: Lang }) {
   }
 
   return (
-    <label className="flex items-center gap-2 rounded-md border border-black/10 bg-white/65 px-2 py-1 text-xs text-ink/70 shadow-sm">
+    <label className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-ink/70 shadow-sm">
       <span className="hidden sm:inline">{lang === "zh" ? "\u8bed\u8a00" : "Lang"}</span>
       <select
         value={lang}
