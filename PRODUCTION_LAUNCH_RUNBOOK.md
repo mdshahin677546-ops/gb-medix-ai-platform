@@ -1,5 +1,39 @@
 # GB Medix AI 2.0 Production Launch Runbook
 
+## 0. Critical Launch Requirements — Session Security Hardening (v2)
+
+> Mandatory reading before any production deploy of this release. All six points
+> below must be satisfied.
+
+1. **Named migration.** This release includes
+   `prisma/migrations/20260710120000_add_user_session_version`. It adds the
+   column `User.sessionVersion`.
+
+2. **Migration risk.** If production does **not** run:
+
+```bash
+npx prisma migrate deploy
+```
+
+   the production database will be missing the `sessionVersion` column, which
+   causes `getCurrentUser` / session validation to fail (every authenticated
+   request errors).
+
+3. **AUTH_SECRET rules.**
+   - Production must configure a strong random `AUTH_SECRET`.
+   - If `AUTH_SECRET` is missing, the app refuses to run.
+   - If `AUTH_SECRET=dev-only-change-me`, the app refuses to run.
+
+4. **Old cookie impact.** After deploy, previously issued 2-part user cookies are
+   invalidated. Users must sign in once more. This is expected security behavior,
+   not a bug.
+
+5. **Doctor / merchant sessions.** Doctor and merchant sessions are **not**
+   affected by this user `sessionVersion` change.
+
+6. **Change scope.** This runbook update only documents the launch security
+   hardening requirements. No business code was modified.
+
 ## 1. Deployment Order
 
 Follow this order for the first production launch:
