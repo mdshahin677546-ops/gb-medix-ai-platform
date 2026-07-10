@@ -57,6 +57,17 @@ export default function HomePage() {
               中文免费检测
             </Link>
           </div>
+          <p className="mt-6 flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs uppercase tracking-wide text-ink/60">
+            <span>
+              <span className="text-mint">01</span> Verify your email
+            </span>
+            <span>
+              <span className="text-mint">02</span> Complete the 3-minute intake
+            </span>
+            <span>
+              <span className="text-mint">03</span> Read your AI report
+            </span>
+          </p>
           <p className="mt-6 rounded-md border border-amber/25 bg-amber/10 p-4 text-sm leading-6 text-ink/72">
             GB Medix AI provides wellness education and health management suggestions.
             It is not a medical diagnosis, treatment plan, emergency service, or a

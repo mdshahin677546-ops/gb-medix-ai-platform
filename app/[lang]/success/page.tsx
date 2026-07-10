@@ -22,7 +22,7 @@ export default async function SuccessPage({
       <Shell lang={lang}>
         <Panel title="Sign in required">
           Please sign in with the email used at checkout to continue.
-          <Link className="mt-5 inline-flex rounded-md bg-leaf px-5 py-3 text-white" href={`/${lang}/account`}>
+          <Link className="mt-5 inline-flex rounded-md bg-leaf px-5 py-3 font-medium text-[#03101c] transition hover:brightness-110" href={`/${lang}/account`}>
             Go to account
           </Link>
         </Panel>
@@ -49,13 +49,17 @@ export default async function SuccessPage({
             Your payment has been verified and Premium access has been granted for
             this assessment.
           </p>
+          <p className="mt-3">
+            Next step: open your report and press <strong>Generate Premium Report</strong> to
+            build the full version for this assessment.
+          </p>
           <p className="mt-3 text-sm text-ink/60">
             Refunds, expired payments, failed payments, or disputes will revoke the
             Premium entitlement automatically.
           </p>
           <Link
             href={report ? `/${lang}/report/${report.id}` : `/${lang}/dashboard`}
-            className="mt-5 inline-flex rounded-md bg-leaf px-5 py-3 font-medium text-white"
+            className="mt-5 inline-flex rounded-md bg-leaf px-5 py-3 font-medium text-[#03101c] transition hover:brightness-110"
           >
             Continue to report
           </Link>
@@ -66,7 +70,7 @@ export default async function SuccessPage({
           return to checkout or contact support if the payment completed.
           <Link
             href={`/${lang}/checkout`}
-            className="mt-5 inline-flex rounded-md bg-leaf px-5 py-3 font-medium text-white"
+            className="mt-5 inline-flex rounded-md bg-leaf px-5 py-3 font-medium text-[#03101c] transition hover:brightness-110"
           >
             Back to checkout
           </Link>

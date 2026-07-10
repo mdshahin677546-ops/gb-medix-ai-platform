@@ -28,7 +28,7 @@ export function ResultView({ lang }: { lang: Lang }) {
       <List title="Hidden Signals" items={result.hiddenSignals} muted />
       <List title="7-Day Plan Preview (30%)" items={result.sevenDayPlanPreview} />
       <div className="rounded-md border border-leaf/25 bg-mist/85 p-5">
-        <h2 className="text-xl font-semibold text-ink">Upgrade CTA</h2>
+        <h2 className="text-xl font-semibold text-ink">Unlock the full plan</h2>
         <p className="mt-2 text-ink/75">{result.upgradeCta}</p>
         <Link
           href={`/${lang}/checkout${recordId ? `?assessmentId=${recordId}` : ""}`}
