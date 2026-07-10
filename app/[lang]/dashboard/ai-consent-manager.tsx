@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import type { Lang } from "@/lib/lang";
 
@@ -56,6 +57,14 @@ export function AIConsentManager({
               ? "\u67e5\u770b\u6216\u64a4\u56de\u5f53\u524d AI Provider \u7684\u7b2c\u4e09\u65b9\u5904\u7406\u540c\u610f\u3002"
               : "Review or revoke consent for the current AI provider."}
           </p>
+          <Link
+            href={`/${lang}/third-party-ai-privacy`}
+            className="mt-2 inline-flex text-sm font-medium text-mint underline-offset-4 hover:underline"
+          >
+            {lang === "zh"
+              ? "\u67e5\u770b\u7b2c\u4e09\u65b9 AI \u5904\u7406\u8bf4\u660e"
+              : "Read third-party AI processing notice"}
+          </Link>
         </div>
         <span className="rounded-md border border-white/10 px-3 py-1 text-xs text-ink/60">
           {status.provider}
