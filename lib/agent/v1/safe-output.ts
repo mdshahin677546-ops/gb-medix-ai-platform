@@ -23,10 +23,12 @@ export type AgentSafeOutput = z.infer<typeof agentSafeOutputSchema>;
 /** Fields the model must never produce. */
 export const FORBIDDEN_OUTPUT_FIELDS = [
   "diagnosis",
+  "diseaseName",
   "prescription",
   "medicationDose",
   "diseaseProbability",
   "treatmentPlan",
+  "triageConclusion",
   "stopMedication",
   "guaranteedOutcome"
 ] as const;
