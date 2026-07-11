@@ -76,8 +76,79 @@ export function getSafeAIError(error: unknown) {
     return { message: error.message, status: 502 };
   }
 
+  logAIProviderRequestError(error);
   return {
     message: "AI provider request failed. Please try again later.",
     status: 502
   };
+}
+
+function logAIProviderRequestError(error: unknown) {
+  console.error("[ai-provider-request-error]", {
+    provider: getProviderForLog(),
+    model: getModelForLog(),
+    baseURLHost: getBaseURLHostForLog(),
+    status: getErrorField(error, "status"),
+    code: getErrorField(error, "code"),
+    type: getErrorField(error, "type"),
+    param: getErrorField(error, "param"),
+    name: error instanceof Error ? error.name : getErrorField(error, "name"),
+    message: getSanitizedErrorMessage(error)
+  });
+}
+
+function getProviderForLog() {
+  try {
+    return getConfiguredAIProviderName();
+  } catch {
+    return "unknown";
+  }
+}
+
+function getModelForLog() {
+  const provider = getProviderForLog();
+  if (provider === "deepseek") {
+    return process.env.DEEPSEEK_MODEL || process.env.AI_MODEL || defaultDeepSeekModel;
+  }
+  if (provider === "openai") {
+    return process.env.OPENAI_MODEL || process.env.AI_MODEL || defaultOpenAIModel;
+  }
+  return process.env.AI_MODEL || "unknown";
+}
+
+function getBaseURLHostForLog() {
+  const provider = getProviderForLog();
+  if (provider !== "deepseek") return undefined;
+  const raw = process.env.DEEPSEEK_BASE_URL || defaultDeepSeekBaseURL;
+  try {
+    return new URL(raw).host;
+  } catch {
+    return "invalid-url";
+  }
+}
+
+function getErrorField(error: unknown, key: string) {
+  if (typeof error !== "object" || error === null) return undefined;
+  const obj = error as Record<string, unknown>;
+  const direct = obj[key];
+  if (typeof direct === "string" || typeof direct === "number") return direct;
+
+  const nested =
+    typeof obj.error === "object" && obj.error !== null
+      ? (obj.error as Record<string, unknown>)
+      : null;
+  const nestedValue = nested?.[key];
+  return typeof nestedValue === "string" || typeof nestedValue === "number"
+    ? nestedValue
+    : undefined;
+}
+
+function getSanitizedErrorMessage(error: unknown) {
+  const direct = error instanceof Error ? error.message : getErrorField(error, "message");
+  if (typeof direct !== "string") return undefined;
+  return direct
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/sk-[A-Za-z0-9_-]{12,}/gi, "[redacted]")
+    .replace(/\b[A-Za-z0-9_-]{48,}\b/g, "[redacted-token]")
+    .slice(0, 300);
 }
