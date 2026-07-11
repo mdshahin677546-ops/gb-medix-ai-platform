@@ -1,112 +1,115 @@
-// Shared API contract v1 — batch 1 tests.
+// Shared API contract v1 — tests that execute the REAL implementation.
 //
-// The contract lives in TypeScript (lib/api-contract/v1/*.ts). node:test cannot
-// import .ts, so — consistent with the rest of this repo's test suite — behavior
-// is exercised via zod mirrors of the contract, and source assertions verify the
-// shipped .ts implements the same shape without leaking sensitive data.
+// node:test cannot import .ts directly and this repo has no TS loader, so the
+// real lib/api-contract/v1 sources are compiled (with the project's own tsc) to
+// CommonJS in a repo-local temp dir and required. Assertions run against the
+// actual exported functions/schemas — no mirrored logic, no source-string checks.
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { createRequire } from "node:module";
 import { z } from "zod";
 
-const read = (p) => readFileSync(p, "utf8");
-const errorCodesSrc = read("lib/api-contract/v1/error-codes.ts");
-const resultSrc = read("lib/api-contract/v1/result.ts");
-const clientSrc = read("lib/api-contract/v1/client.ts");
-const commonSrc = read("lib/api-contract/v1/common.ts");
-const authSrc = read("lib/api-contract/v1/auth.ts");
-const indexSrc = read("lib/api-contract/v1/index.ts");
+const SRC = "lib/api-contract/v1";
+const outDir = mkdtempSync(join(process.cwd(), ".tmp-apicontract-"));
+const requireCjs = createRequire(import.meta.url);
 
-const EXPECTED_CODES = [
-  "AUTH_REQUIRED", "TOKEN_EXPIRED", "EMAIL_VERIFICATION_REQUIRED", "AI_CONSENT_REQUIRED",
-  "ENTITLEMENT_REQUIRED", "RATE_LIMITED", "AI_PROVIDER_ERROR", "AI_OUTPUT_INVALID",
-  "SAFETY_ESCALATION_REQUIRED", "RESOURCE_NOT_FOUND", "ACCESS_DENIED", "VALIDATION_ERROR",
-  "CONFLICT", "INTERNAL_ERROR"
-];
+const tsFiles = readdirSync(SRC).filter((f) => f.endsWith(".ts")).map((f) => join(SRC, f));
+execFileSync(
+  process.execPath,
+  [
+    "node_modules/typescript/bin/tsc",
+    ...tsFiles,
+    "--outDir", outDir,
+    "--rootDir", SRC,
+    "--module", "commonjs",
+    "--target", "es2020",
+    "--moduleResolution", "node",
+    "--esModuleInterop",
+    "--skipLibCheck"
+  ],
+  { stdio: "pipe" }
+);
+const api = requireCjs(resolve(outDir, "index.js"));
 
-// ---- error codes ----
-test("all required error codes are declared exactly once", () => {
-  for (const code of EXPECTED_CODES) {
-    assert.ok(errorCodesSrc.includes(`"${code}"`), `missing code ${code}`);
-  }
-  assert.match(errorCodesSrc, /export type ApiErrorCode/);
-  assert.match(errorCodesSrc, /export function isApiErrorCode/);
+test.after(() => rmSync(outDir, { recursive: true, force: true }));
+
+// 1. all error codes exist; invalid rejected
+test("error codes: all present, invalid rejected (real)", () => {
+  const expected = [
+    "AUTH_REQUIRED", "TOKEN_EXPIRED", "EMAIL_VERIFICATION_REQUIRED", "AI_CONSENT_REQUIRED",
+    "ENTITLEMENT_REQUIRED", "RATE_LIMITED", "AI_PROVIDER_ERROR", "AI_OUTPUT_INVALID",
+    "SAFETY_ESCALATION_REQUIRED", "RESOURCE_NOT_FOUND", "ACCESS_DENIED", "VALIDATION_ERROR",
+    "CONFLICT", "INTERNAL_ERROR"
+  ];
+  assert.deepEqual([...api.API_ERROR_CODES].sort(), [...expected].sort());
+  for (const c of expected) assert.equal(api.isApiErrorCode(c), true);
+  assert.equal(api.isApiErrorCode("NOPE"), false);
+  assert.equal(api.apiErrorCodeSchema.safeParse("NOPE").success, false);
 });
 
-const apiErrorCodeSchema = z.enum(EXPECTED_CODES);
-test("error code enum parses valid and rejects invalid", () => {
-  assert.equal(apiErrorCodeSchema.parse("AI_CONSENT_REQUIRED"), "AI_CONSENT_REQUIRED");
-  assert.equal(apiErrorCodeSchema.safeParse("NOT_A_CODE").success, false);
-  assert.equal(apiErrorCodeSchema.safeParse("").success, false);
+// 2. HTTP/retryable mapping (real functions)
+test("http + retryable mapping run the real functions", () => {
+  assert.equal(api.API_ERROR_HTTP_STATUS.ENTITLEMENT_REQUIRED, 402);
+  assert.equal(api.errorCodeForStatus(402), "ENTITLEMENT_REQUIRED");
+  assert.equal(api.errorCodeForStatus(999), "INTERNAL_ERROR");
+  assert.equal(api.fail("RATE_LIMITED", "x").error.retryable, true);
+  assert.equal(api.fail("ACCESS_DENIED", "x").error.retryable, false);
 });
 
-// ---- result envelopes (mirror of result.ts) ----
-const errorEnvelope = z
-  .object({
-    ok: z.literal(false),
-    error: z
-      .object({
-        code: apiErrorCodeSchema,
-        message: z.string().min(1),
-        requestId: z.string().min(1).optional(),
-        retryable: z.boolean()
-      })
-      .strict()
-  })
-  .strict();
-const successEnvelope = (d) => z.object({ ok: z.literal(true), data: d, requestId: z.string().min(1).optional() }).strict();
-
-test("success envelope accepts typed data", () => {
-  const s = successEnvelope(z.object({ id: z.string() }).strict());
-  assert.equal(s.safeParse({ ok: true, data: { id: "abc" } }).success, true);
+// 3. success/error Zod (real)
+test("success + error envelope schemas validate (real Zod)", () => {
+  const success = api.apiSuccessSchema(z.object({ id: z.string() }).strict());
+  assert.equal(success.safeParse({ ok: true, data: { id: "abc" } }).success, true);
+  assert.equal(success.safeParse({ ok: true, data: { id: 1 } }).success, false);
+  assert.equal(api.apiErrorResponseSchema.safeParse({ ok: false, error: { code: "RATE_LIMITED", message: "x", retryable: true } }).success, true);
+  assert.equal(api.apiErrorResponseSchema.safeParse({ ok: false, error: { code: "NOPE", message: "x", retryable: true } }).success, false);
 });
 
-test("error envelope requires a valid code and rejects extra/sensitive fields", () => {
-  assert.equal(errorEnvelope.safeParse({ ok: false, error: { code: "RATE_LIMITED", message: "x", retryable: true } }).success, true);
-  // invalid code
-  assert.equal(errorEnvelope.safeParse({ ok: false, error: { code: "NOPE", message: "x", retryable: true } }).success, false);
-  // extra field (e.g. leaked stack / token) rejected by .strict()
-  assert.equal(errorEnvelope.safeParse({ ok: false, error: { code: "INTERNAL_ERROR", message: "x", retryable: false, stack: "secret" } }).success, false);
-});
-
-test("result.ts wires strict envelopes + retryable helper", () => {
-  assert.match(resultSrc, /apiErrorResponseSchema/);
-  assert.match(resultSrc, /\.strict\(\)/);
-  assert.match(resultSrc, /retryable:\s*RETRYABLE_API_ERROR_CODES\.has\(code\)/);
-});
-
-// ---- DTO strictness / no sensitive fields ----
-test("DTOs use .strict() so unexpected sensitive fields are rejected", () => {
-  for (const [name, src] of [["auth", authSrc], ["common", commonSrc]]) {
-    assert.match(src, /\.strict\(\)/, `${name} should use strict objects`);
-  }
-  // FORBIDDEN_DTO_FIELDS denylist is declared for contract assertions.
-  for (const f of ["passwordHash", "sessionVersion", "accessToken", "refreshToken", "cookie", "email", "prisma"]) {
-    assert.ok(commonSrc.includes(`"${f}"`), `FORBIDDEN_DTO_FIELDS missing ${f}`);
+// 4. .strict() rejects stack/cause/body/rawError/unknown
+test("error envelope .strict() rejects leaked fields", () => {
+  for (const extra of [{ stack: "s" }, { cause: "c" }, { body: "b" }, { rawError: "r" }, { anything: 1 }]) {
+    const payload = { ok: false, error: { code: "INTERNAL_ERROR", message: "x", retryable: false, ...extra } };
+    assert.equal(api.apiErrorResponseSchema.safeParse(payload).success, false);
   }
 });
 
-test("a strict DTO rejects a schema-invalid payload and forbidden fields", () => {
-  const dto = z.object({ id: z.string().min(1), status: z.enum(["pending", "active"]) }).strict();
-  assert.equal(dto.safeParse({ id: "u1", status: "active" }).success, true);
-  assert.equal(dto.safeParse({ id: "u1", status: "bogus" }).success, false); // invalid enum
-  assert.equal(dto.safeParse({ id: "u1", status: "active", passwordHash: "x" }).success, false); // forbidden extra
-  assert.equal(dto.safeParse({ id: "", status: "active" }).success, false); // empty id
+// 5. Auth DTOs reject passwordHash / cookie / token / provider key
+test("auth DTOs reject sensitive/unknown fields (real strict)", () => {
+  assert.equal(api.loginRequestSchema.safeParse({ email: "a@b.com", passwordHash: "x" }).success, false);
+  assert.equal(api.meSchema.safeParse({ id: "u", status: "active", emailVerified: true, cookie: "x" }).success, false);
+  assert.equal(api.authTokensSchema.safeParse({ accessToken: "a", refreshToken: "r", expiresInSeconds: 1, deepseekApiKey: "k" }).success, false);
+  assert.equal(api.meSchema.safeParse({ id: "u", status: "active", emailVerified: true }).success, true);
 });
 
-// ---- client error mapping does not leak ----
-test("client maps to safe messages and never echoes raw error text", () => {
-  assert.match(clientSrc, /SAFE_ERROR_MESSAGE/);
-  assert.match(clientSrc, /export function toSafeApiError/);
-  // must not stringify or forward the raw error / body / message input
-  assert.doesNotMatch(clientSrc, /input\.message|JSON\.stringify\(|error\.stack|response\.body/);
+// 6. Consent accept request cannot fabricate a server authorization fact
+test("consent accept request cannot inject server-fact fields", () => {
+  assert.equal(api.consentAcceptRequestSchema.safeParse({ consentVersion: "v1", providerScope: ["deepseek"] }).success, true);
+  assert.equal(api.consentAcceptRequestSchema.safeParse({ consentVersion: "v1", providerScope: ["deepseek"], accepted: true }).success, false);
+  assert.equal(api.consentAcceptRequestSchema.safeParse({ consentVersion: "v1", providerScope: ["deepseek"], acceptedAt: "2026-01-01T00:00:00Z" }).success, false);
 });
 
-// ---- no forbidden implementation leaks in this batch ----
-test("batch introduces no /api/v1 route, Prisma import, or production URL", () => {
-  const all = [errorCodesSrc, resultSrc, clientSrc, commonSrc, authSrc, indexSrc].join("\n");
-  assert.doesNotMatch(all, /@prisma\/client|from "@\/lib\/prisma"/);
-  assert.doesNotMatch(all, /https?:\/\/ai\.gbmedix\.com|api\.deepseek\.com|aihubmix/i);
-  assert.match(indexSrc, /API_CONTRACT_VERSION = "v1"/);
+// 7. Entitlement DTO cannot let a client self-declare activation
+test("entitlement DTO is strict; no client activation request exists", () => {
+  const valid = { id: "e1", productCode: "premium_report", resourceType: null, resourceId: null, status: "active", expiresAt: null };
+  assert.equal(api.entitlementSchema.safeParse(valid).success, true);
+  assert.equal(api.entitlementSchema.safeParse({ ...valid, grantedByClient: true }).success, false);
+  const exported = Object.keys(api);
+  assert.equal(exported.some((k) => /activate|grantEntitlement/i.test(k)), false);
+});
+
+// 8. Client safe error mapping never echoes raw error / message / body / token
+test("toSafeApiError returns fixed safe messages, never raw input", () => {
+  const mapped = api.toSafeApiError({ code: "AI_PROVIDER_ERROR", status: 502, requestId: "r1" });
+  assert.equal(mapped.ok, false);
+  assert.equal(mapped.error.code, "AI_PROVIDER_ERROR");
+  assert.equal(mapped.error.retryable, true);
+  assert.doesNotMatch(mapped.error.message, /secret|sk-|stacktrace|line 42/i);
+  const raw = "UPSTREAM SECRET sk-leak stacktrace at line 42";
+  const mapped2 = api.toSafeApiError({ status: 500, code: raw });
+  assert.equal(mapped2.error.code, "INTERNAL_ERROR");
+  assert.doesNotMatch(mapped2.error.message, /secret|sk-|stacktrace/i);
 });
