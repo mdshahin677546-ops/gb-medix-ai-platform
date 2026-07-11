@@ -149,6 +149,8 @@ function getSanitizedErrorMessage(error: unknown) {
   return direct
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/sk-[A-Za-z0-9_-]{12,}/gi, "[redacted]")
+    .replace(/key:\([^)]+\)/gi, "key:([redacted])")
+    .replace(/\btid:\s*[A-Za-z0-9_-]+/gi, "tid:[redacted]")
     .replace(/\b[A-Za-z0-9_-]{48,}\b/g, "[redacted-token]")
     .slice(0, 300);
 }
