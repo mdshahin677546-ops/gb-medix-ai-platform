@@ -74,9 +74,13 @@ export class AIProviderConfigError extends Error {
   }
 }
 
+export type AIOutputFailureStage = "json_parse" | "schema_validation";
+
 export class AIProviderOutputError extends Error {
-  constructor(message: string) {
+  readonly stage: AIOutputFailureStage;
+  constructor(message: string, stage: AIOutputFailureStage = "json_parse") {
     super(message);
     this.name = "AIProviderOutputError";
+    this.stage = stage;
   }
 }

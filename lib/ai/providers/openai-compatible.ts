@@ -98,19 +98,19 @@ export class OpenAICompatibleProvider implements AIProvider {
     // (502) and is never stored.
     const candidate = extractTopLevelJsonObject(content);
     if (candidate === null) {
-      throw new AIProviderOutputError("AI report output was not valid JSON.");
+      throw new AIProviderOutputError("AI report output was not valid JSON.", "json_parse");
     }
 
     let rawJson: unknown;
     try {
       rawJson = JSON.parse(candidate);
     } catch {
-      throw new AIProviderOutputError("AI report output was not valid JSON.");
+      throw new AIProviderOutputError("AI report output was not valid JSON.", "json_parse");
     }
 
     const parsed = input.schema.safeParse(rawJson);
     if (!parsed.success) {
-      throw new AIProviderOutputError("AI report output failed schema validation.");
+      throw new AIProviderOutputError("AI report output failed schema validation.", "schema_validation");
     }
 
     return {

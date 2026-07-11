@@ -18,6 +18,11 @@ const content = {
           "This notice currently applies to third-party AI providers including DeepSeek, Qwen, Kimi, GLM, and Doubao. Before these providers process your assessment information, GB Medix asks for your active consent."
       },
       {
+        title: "AI request routing and relay (AIHubMix)",
+        body:
+          "Third-party AI requests may be sent through an AI gateway/relay service (AIHubMix), which routes each request to the selected underlying model (for example DeepSeek). The relay acts as a processing intermediary in the request path. The same data-minimization rules described below apply before any request leaves GB Medix, whether the model is reached directly or through the relay."
+      },
+      {
         title: "Data types processed",
         body:
           "The provider may process health assessment questionnaire answers, sleep, fatigue, diet, stress, activity, digestion and lifestyle pattern inputs, optional uploaded context summaries, current language, report type, and desensitized health context required to generate a report."
@@ -55,6 +60,11 @@ const content = {
         title: "\u7b2c\u4e09\u65b9 AI \u670d\u52a1",
         body:
           "\u672c\u8bf4\u660e\u5f53\u524d\u9002\u7528\u4e8e DeepSeek\u3001Qwen\u3001Kimi\u3001GLM\u3001Doubao \u7b49\u7b2c\u4e09\u65b9 AI Provider\u3002\u5728\u8fd9\u4e9b Provider \u5904\u7406\u4f60\u7684\u8bc4\u4f30\u4fe1\u606f\u524d\uff0cGB Medix \u4f1a\u8981\u6c42\u4f60\u4e3b\u52a8\u540c\u610f\u3002"
+      },
+      {
+        title: "AI \u8bf7\u6c42\u4e2d\u8f6c\u4e0e\u6a21\u578b\u8def\u7531\uff08AIHubMix\uff09",
+        body:
+          "\u7b2c\u4e09\u65b9 AI \u8bf7\u6c42\u53ef\u80fd\u901a\u8fc7 AI \u7f51\u5173/\u4e2d\u8f6c\u670d\u52a1\uff08AIHubMix\uff09\u53d1\u9001\uff0c\u7531\u5176\u5c06\u6bcf\u6b21\u8bf7\u6c42\u8def\u7531\u5230\u6240\u9009\u7684\u5e95\u5c42\u6a21\u578b\uff08\u4f8b\u5982 DeepSeek\uff09\u3002\u4e2d\u8f6c\u670d\u52a1\u5728\u8bf7\u6c42\u94fe\u8def\u4e2d\u4f5c\u4e3a\u5904\u7406\u4e2d\u4ecb\u3002\u65e0\u8bba\u76f4\u63a5\u8bbf\u95ee\u6a21\u578b\u8fd8\u662f\u7ecf\u7531\u4e2d\u8f6c\uff0c\u4e0b\u8ff0\u6570\u636e\u6700\u5c0f\u5316\u89c4\u5219\u5728\u8bf7\u6c42\u79bb\u5f00 GB Medix \u524d\u540c\u6837\u9002\u7528\u3002"
       },
       {
         title: "\u5904\u7406\u7684\u6570\u636e\u7c7b\u578b",

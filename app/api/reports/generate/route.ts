@@ -18,6 +18,7 @@ import {
 } from "@/lib/ai/provider-factory";
 import { buildReportSystemPrompt } from "@/lib/ai/prompts";
 import { buildMinimalHealthPayload } from "@/lib/ai/sanitize";
+import { logAIDiagnostic } from "@/lib/ai/diagnostics";
 import {
   ensureAIConsentForProvider,
   isAIConsentRequiredError
@@ -114,6 +115,7 @@ export async function POST(request: Request) {
   try {
     provider = getAIProvider();
   } catch (error) {
+    logAIDiagnostic({ endpoint: "/api/reports/generate", stage: "provider_init", error });
     const safeError = getSafeAIError(error);
     return NextResponse.json({ error: safeError.message }, { status: safeError.status });
   }
@@ -182,6 +184,7 @@ export async function POST(request: Request) {
     report = completion.content;
     tokens = completion.usage.totalTokens || estimatedTokens;
   } catch (error) {
+    logAIDiagnostic({ provider: provider.name, model, endpoint: "/api/reports/generate", error });
     await prisma.aIReport.update({
       where: { id: placeholder.id },
       data: { status: "failed" }

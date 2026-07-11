@@ -16,6 +16,10 @@ In v1, explicit consent is required before using third-party AI providers:
 
 OpenAI is temporarily not gated in v1 to avoid interrupting the current production flow. A future release should consider one unified AI processing consent standard for all AI providers.
 
+## AI Request Routing And Relay (AIHubMix)
+
+Third-party AI requests may be sent through an AI gateway/relay service (AIHubMix), which routes each request to the selected underlying model (for example DeepSeek). The relay acts as a processing intermediary in the request path. The same data-minimization rules below apply before any request leaves GB Medix, whether the model is reached directly or through the relay.
+
 ## Data Types Processed
 
 The AI provider may process:

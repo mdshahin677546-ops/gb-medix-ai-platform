@@ -182,8 +182,8 @@ test("provider still enforces json_object + JSON.parse + Zod, with safe errors",
   assert.match(providerSource, /response_format:\s*\{\s*type:\s*"json_object"\s*\}/);
   assert.match(providerSource, /JSON\.parse\(candidate\)/);
   assert.match(providerSource, /input\.schema\.safeParse\(rawJson\)/);
-  assert.match(providerSource, /throw new AIProviderOutputError\("AI report output was not valid JSON\."\)/);
-  assert.match(providerSource, /throw new AIProviderOutputError\("AI report output failed schema validation\."\)/);
+  assert.match(providerSource, /throw new AIProviderOutputError\("AI report output was not valid JSON\.", "json_parse"\)/);
+  assert.match(providerSource, /throw new AIProviderOutputError\("AI report output failed schema validation\.", "schema_validation"\)/);
 });
 
 test("no automatic provider fallback and no relaxed schema", () => {
