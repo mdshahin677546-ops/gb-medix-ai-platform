@@ -2,7 +2,14 @@
 
 分支：`feature/ai-consultation-agent`　|　日期：2026-07-10　|　状态：规划（PLANNED；不改业务代码 / Schema；不建 migration）
 
-> 品牌 **GB MEDIX AI**。产品名：**GB MEDIX AI 智能健康问诊**。标签：EXISTING / PLANNED / BLOCKED / REQUIRES_DECISION。
+> 品牌 **GB MEDIX AI**。产品名：**GB MEDIX AI 智能健康问诊**。
+>
+> **Status legend**
+> - `EXISTING_CODE`：可由当前仓库代码验证
+> - `PLANNED`：尚未实施的设计
+> - `BLOCKED`：前置安全或架构条件满足前不得实施
+> - `REQUIRES_DECISION`：尚需产品、法律、平台或架构决策
+> - `UNVERIFIED_PRODUCTION_CONFIGURATION`：据项目运行记录存在，但不能仅通过仓库验证
 
 ---
 
@@ -12,7 +19,7 @@
 ## 2. 产品边界
 **可以做**：健康信息收集 · 生活方式分析 · 中医体质健康倾向 · 健康教育 · 睡眠/饮食/压力/运动建议 · 健康计划 · 健康目标 · 安全风险提醒 · 建议寻求专业医疗帮助。
 
-**不得做**：疾病诊断 · 开处方 · 治疗方案 · 停药或调整药物 · 疾病概率 · 自动分诊结论 · 替代医生 · 宣称治愈 · 将产品描述为治疗疾病。（与现有 `lib/ai/prompts.ts` `medicalSafetyPrompt` 一致，EXISTING。）
+**不得做**：疾病诊断 · 开处方 · 治疗方案 · 停药或调整药物 · 疾病概率 · 自动分诊结论 · 替代医生 · 宣称治愈 · 将产品描述为治疗疾病。（与现有 `lib/ai/prompts.ts` `medicalSafetyPrompt` 一致，EXISTING_CODE。）
 
 ---
 
@@ -71,12 +78,12 @@ safety_escalated · provider_failed · invalid_output · cancelled
 
 ## 5. 数据模型规划（PLANNED；本轮不改 Schema）
 
-> 现有 EXISTING：`Conversation`、`Message`（基础表）。以下为**设计草案**，正式建模走**单独 migration 评审**。所有含健康数据的表按 `userId`（及 `familyMemberId`）隔离；健康原文不入日志。
+> 现有 EXISTING_CODE：`Conversation`、`Message`（基础表）。以下为**设计草案**，正式建模走**单独 migration 评审**。所有含健康数据的表按 `userId`（及 `familyMemberId`）隔离；健康原文不入日志。
 
 | 模型 | 目的 | 关键字段 | 与 User | 与 familyMemberId | 保留期 | 敏感级 | 删除/导出 | 索引 | soft delete | 可含模型原始输出 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Conversation (EXISTING) | 会话容器 | id,userId,locale,status | 属主 | 可选 | 随账户 | 高 | 级联 | userId,status | 建议是 | 否 |
-| Message (EXISTING) | 对话消息 | id,conversationId,role,content(脱敏) | 经会话 | 经会话 | 随会话 | 高 | 级联 | conversationId,createdAt | 否(追加) | 存用户/助手文本，非 provider 原始错误 |
+| Conversation (EXISTING_CODE) | 会话容器 | id,userId,locale,status | 属主 | 可选 | 随账户 | 高 | 级联 | userId,status | 建议是 | 否 |
+| Message (EXISTING_CODE) | 对话消息 | id,conversationId,role,content(脱敏) | 经会话 | 经会话 | 随会话 | 高 | 级联 | conversationId,createdAt | 否(追加) | 存用户/助手文本，非 provider 原始错误 |
 | AgentRun (PLANNED) | 一次 agent 运行 | id,conversationId,agentType,state,error?,startedAt,endedAt | 经会话 | 经会话 | 随会话 | 中 | 级联 | conversationId,state | 是 | 否（仅状态/引用） |
 | AgentStep (PLANNED) | 运行内步骤 | id,agentRunId,stepType,status,stepIndex | 经 Run | 经 Run | 随 Run | 中 | 级联 | agentRunId,status | 是 | 否 |
 | ConversationSummary (PLANNED) | 会话摘要 | id,conversationId,summary,version | 经会话 | 经会话 | 随会话 | 高 | 级联 | conversationId,version | 是 | 摘要非原文 |
@@ -89,23 +96,45 @@ safety_escalated · provider_failed · invalid_output · cancelled
 
 ---
 
-## 6. AI Provider 规则（EXISTING，必须保留）
-- 架构：OpenAI-compatible Adapter · **AIHubMix**（中转）· 生产 Provider `deepseek` · 实际模型 **`baidu-deepseek-v4-pro`**（经 `DEEPSEEK_MODEL` 配置；代码默认 `deepseek-chat`）。
-- 必须保留：`JSON.parse` · Zod `safeParse` · 非法输出返回安全错误（502）· **不保存非法模型原文** · 允许 **failed placeholder** 作为审计记录 · **禁止自动跨 Provider fallback** · 同 Provider 兼容性重试（如去 `response_format` 重试）**仍必须过 Zod**。
-- 复用现有：AI Consent · AIUsage · 数据最小化 · 限流（`enforceAIUsageBudget → 调用 → recordAIUsage`）· Safe Error · Entitlement · SessionVersion。
+## 6. AI Provider 规则（分两层事实，必须保留安全要求）
+
+### A. 仓库可验证代码事实（EXISTING_CODE）
+```text
+EXISTING_CODE:
+- 仓库存在 OpenAI-compatible AI Provider Adapter（lib/ai/providers/openai-compatible.ts）。
+- 代码支持通过配置选择 DeepSeek 或兼容 Provider（lib/ai/provider-factory.ts）。
+- 代码中的默认 DeepSeek 模型为 `deepseek-chat`（DEEPSEEK_MODEL || AI_MODEL || "deepseek-chat"）。
+- AI 路由必须通过服务端 Provider Adapter 调用，不允许 Web、App 或 Agent 直接调用外部 Provider。
+```
+
+### B. 无法由仓库验证的生产配置（UNVERIFIED_PRODUCTION_CONFIGURATION）
+```text
+UNVERIFIED_PRODUCTION_CONFIGURATION:
+- 根据既有项目运行记录，生产环境据报配置为 DeepSeek Provider。
+- 根据既有项目运行记录，生产请求据报通过 AIHubMix 或兼容模型网关转发。
+- 根据既有项目运行记录，生产模型据报为 `baidu-deepseek-v4-pro`。
+- 上述生产环境事实不能仅通过当前 Git 仓库验证。
+- 在任何依赖该生产配置的开发、测试或上线操作前，必须由平台负责人提供去敏后的部署配置、环境变量名称、平台状态或运行证据。
+- 禁止在文档、聊天、日志或 Git 中提供真实 API Key、密钥值、Token 或数据库连接串。
+```
+
+### C. 必须保留的安全要求（EXISTING_CODE，不得删除或弱化）
+- `JSON.parse` · Zod `safeParse` · 非法输出返回安全错误（502）· **不保存非法模型原文** · 允许 **failed placeholder** 作为审计记录 · **禁止自动跨 Provider fallback** · 同 Provider 兼容性重试（如去 `response_format` 重试）**仍必须过 Zod**。
+- **数据最小化**（Provider Payload Allowlist，见 §8）。
+- 复用现有：AI Consent · AIUsage · 限流（`enforceAIUsageBudget → 调用 → recordAIUsage`）· Safe Error · Entitlement · SessionVersion。
 
 ---
 
 ## 7. Consent
 第三方 AI Provider 调用前必须检查 Consent，涉及 `deepseek · qwen · kimi · glm · doubao`（经 AIHubMix）。
-- **所有智能体入口统一使用 Consent Gate**（`ensureAIConsentForProvider`，EXISTING）。
+- **所有智能体入口统一使用 Consent Gate**（`ensureAIConsentForProvider`，EXISTING_CODE）。
 - Consent 撤回后：新 AgentRun **不得**调用第三方 Provider；已有对话**可读取**但不得继续第三方处理；用户需**重新同意**才能恢复。
 
 ---
 
 ## 8. 数据最小化（Provider Payload Allowlist）
 **不得发送给 AI Provider**：email · userId · paymentId · entitlementId · IP · Cookie · Session · Token · API Key · 完整数据库对象 · 无关健康历史。
-- 定义 **Provider Payload Allowlist**（仅本次问诊必要的脱敏健康维度：问卷答案枚举、睡眠/饮食/压力/运动/身体感受结构化输入、locale、报告类型）。复用现有 `buildMinimalHealthPayload`（EXISTING）。
+- 定义 **Provider Payload Allowlist**（仅本次问诊必要的脱敏健康维度：问卷答案枚举、睡眠/饮食/压力/运动/身体感受结构化输入、locale、报告类型）。复用现有 `buildMinimalHealthPayload`（EXISTING_CODE）。
 
 ---
 
@@ -117,10 +146,10 @@ safety_escalated · provider_failed · invalid_output · cancelled
 
 ---
 
-## 10. 审计与日志（allowlist，EXISTING 已具备）
+## 10. 审计与日志（allowlist，EXISTING_CODE 已具备）
 **允许日志**：provider · model · endpoint · HTTP status · error code/type · request id · failure stage · retryable · timestamp。
 **禁止日志**：Prompt 原文 · 健康内容 · 对话原文 · Provider error.message 原文 · request/response body · email · userId · Cookie · Token · 密钥。
-> 复用 `lib/ai/diagnostics.ts` 的 allowlist 诊断（EXISTING）。
+> 复用 `lib/ai/diagnostics.ts` 的 allowlist 诊断（EXISTING_CODE）。
 
 ---
 

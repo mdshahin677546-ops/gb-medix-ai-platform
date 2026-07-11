@@ -251,7 +251,46 @@ Schema/Migration owner owns:    Prisma Schema · migration naming/order · migra
   "schemaVersion": 1
 }
 ```
-**不得明文**：email · userId · paymentId · reportId · entitlementId · checkoutSessionId · health answer · conversation content。
+**Analytics 禁止上传字段（denylist）** —— 以下一律不得进入 Analytics：
+```text
+- email
+- 明文 userId
+- 用户姓名或直接身份信息
+- 完整 IP
+- Cookie
+- Session
+- Access Token
+- Refresh Token
+- Authorization Header
+- API Key
+- paymentId
+- Stripe Checkout Session ID
+- Stripe PaymentIntent ID
+- refundReference 原文
+- reportId
+- entitlementId
+- conversationId
+- assessmentId
+- 数据库内部 ID 原文
+- 健康评估答案
+- 症状或身体感受原文
+- AI 对话正文
+- Prompt 原文
+- AI Provider 输出原文
+- Report 正文或报告内容
+- 健康计划正文
+- SafetyEvent 健康描述原文
+- request body
+- response body
+- 完整数据库对象
+```
+**认证信息必须逐项禁止（不得只写泛化"认证信息"）**：`Cookie` · `Session Cookie` · `Access Token` · `Refresh Token` · `Authorization Header`。
+
+**报告内容禁止**：`Report 正文` · `报告摘要原文` · `报告建议原文` · `报告中的健康数据`。`report_unlocked` 事件**可记录的仅为**：`report_unlocked = true` · `report_type = free|premium` · `schemaVersion` · 去敏 `eventId` · `occurredAt` · `source`。**不得记录报告内容。**
+
+**最小化 + HMAC secret 服务端专有**：Analytics 只能接收最小化、去敏、不可逆或受控 HMAC 后的事件标识及业务状态。HMAC 使用的 event secret 只能保存在**服务端安全配置**中，**不得**发送到客户端、Analytics 平台、日志或 Git。
+
+**去敏 ID 规则**：Analytics 只接收 HMAC 后结果，不接收内部原始 ID；HMAC secret 不进入客户端；HMAC 结果**不得**用于 API 资源访问或权限判断；Analytics `eventId` 只用于统计去重；**不得将去敏 Analytics ID 当作认证标识**。
 
 **服务端为准事件去重键**（`HMAC(event-secret, ...)`，文档不暴露真实 secret，Analytics 只收去敏结果）：
 - `payment_success` → `HMAC(secret,"payment_success:"+internalPaymentId+":"+paymentStateVersion)`；Stripe webhook 可能重放，用支付处理层幂等结果，同一状态迁移只记一次。
