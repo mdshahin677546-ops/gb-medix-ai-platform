@@ -1,13 +1,20 @@
+import { z } from "zod";
+
 /**
  * Cursor pagination for /api/v1 list endpoints (pure).
  *
  * Keyset pagination over a stable (createdAt DESC, id DESC) ordering so pages
- * never duplicate or drop rows. The cursor is an opaque base64 of
- * "createdAtISO|id" — clients treat it as a bare token and never parse it.
+ * never duplicate or drop rows. The cursor is an opaque base64url of a strict
+ * JSON payload { c: createdAtISO, i: id }. It is validated defensively BEFORE
+ * decoding (length + charset) and AFTER decoding (strict Zod), never trusting
+ * Buffer.from's lenient behavior, and it carries pagination keys only — never a
+ * userId, health content, or any authorization signal.
  */
 
 export const DEFAULT_PAGE_LIMIT = 20;
 export const MAX_PAGE_LIMIT = 50;
+// A well-formed cursor is far below this; the cap bounds work before decoding.
+export const MAX_CURSOR_LENGTH = 512;
 
 export type PageCursor = { createdAt: string; id: string };
 
@@ -15,36 +22,53 @@ export type ParsedPagination =
   | { ok: true; limit: number; cursor: PageCursor | null }
   | { ok: false };
 
+const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+
+// Strict decoded shape: exactly a createdAt ISO datetime + an opaque id, nothing else.
+const cursorPayloadSchema = z
+  .object({
+    c: z.string().datetime(),
+    i: z.string().min(1).max(128)
+  })
+  .strict();
+
 function isPositiveIntString(value: string): boolean {
   return /^[0-9]+$/.test(value);
 }
 
 export function encodeCursor(cursor: PageCursor): string {
-  return Buffer.from(`${cursor.createdAt}|${cursor.id}`, "utf8").toString("base64url");
+  const json = JSON.stringify({ c: cursor.createdAt, i: cursor.id });
+  return Buffer.from(json, "utf8").toString("base64url");
 }
 
 export function decodeCursor(raw: string): PageCursor | null {
+  // Bound work and reject anything that is not strict base64url before decoding.
+  if (raw.length === 0 || raw.length > MAX_CURSOR_LENGTH) return null;
+  if (!BASE64URL_RE.test(raw)) return null;
+
   let decoded: string;
   try {
     decoded = Buffer.from(raw, "base64url").toString("utf8");
   } catch {
     return null;
   }
-  const sep = decoded.indexOf("|");
-  if (sep <= 0 || sep === decoded.length - 1) return null;
-  const createdAt = decoded.slice(0, sep);
-  const id = decoded.slice(sep + 1);
-  // createdAt must be a valid ISO timestamp; id a non-empty opaque string.
-  if (!id || id.length > 128) return null;
-  const time = Date.parse(createdAt);
-  if (Number.isNaN(time)) return null;
-  return { createdAt, id };
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+
+  const result = cursorPayloadSchema.safeParse(parsedJson);
+  if (!result.success) return null;
+  return { createdAt: result.data.c, id: result.data.i };
 }
 
 /**
  * Validate raw query params. Rejects unknown / oversized limits and malformed
  * cursors so a caller can map failure to VALIDATION_ERROR (400). A missing limit
- * defaults to DEFAULT_PAGE_LIMIT; a missing cursor means "first page".
+ * defaults to DEFAULT_PAGE_LIMIT; a missing/empty cursor means "first page".
  */
 export function parsePagination(raw: {
   limit?: string | null;

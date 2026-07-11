@@ -23,13 +23,26 @@ export type EntitlementInput = {
 };
 
 /**
- * Map the free-form DB status string to the shared enum. A status the contract
- * does not model is surfaced as a conservative, non-unlocking "expired" rather
- * than being invented — it must never read as "active".
+ * Thrown when a DB entitlement status is not modeled by the shared contract.
+ * The mapper NEVER guesses a status (in particular never invents "active" or a
+ * silent "expired"); the caller collapses this to a safe INTERNAL_ERROR.
+ */
+export class UnmappedEntitlementStatusError extends Error {
+  constructor() {
+    super("Entitlement status is not representable in the shared contract.");
+    this.name = "UnmappedEntitlementStatusError";
+  }
+}
+
+/**
+ * Map the DB status string to the shared enum via an explicit, exhaustive check.
+ * An unmodeled status fails loudly (caller -> INTERNAL_ERROR) rather than being
+ * fabricated — it must never read as "active" or be silently downgraded.
  */
 function toEntitlementStatus(raw: string): EntitlementStatus {
   const parsed = entitlementStatusSchema.safeParse(raw);
-  return parsed.success ? parsed.data : "expired";
+  if (!parsed.success) throw new UnmappedEntitlementStatusError();
+  return parsed.data;
 }
 
 function toIso(value: Date | string | null): string | null {

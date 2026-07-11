@@ -24,9 +24,17 @@ Mobile API client and Agent service layer. This batch is **read-only** and adds
   auth (DeviceSession + refresh token) is a separate, later, Codex-reviewed task.
 - **Same-origin only.** No CORS headers are added; cross-site credentialed access
   is not enabled in this batch.
-- Read endpoints allow a signed-in but not-yet-email-verified user to read their
-  own state (matching existing `/api/session` and `/api/reports/[id]` behavior).
-  Email verification remains enforced on write flows (e.g. report generation).
+
+### Two-tier authorization
+
+- `GET /api/v1/me` uses an **auth-only** guard: a signed-in but not-yet-verified
+  (`pending`) user may read their own safe status to drive the verification UI.
+- `GET /api/v1/ai-consent`, `/reports`, `/reports/:id`, `/entitlements` require an
+  **active, email-verified** user (`status === "active"` and `emailVerifiedAt != null`).
+  A pending/unverified user receives `403 EMAIL_VERIFICATION_REQUIRED`, and no
+  database / consent / entitlement dependency is touched before that gate passes.
+- Guards never trust a client-supplied `status`, `emailVerified`, or `userId`, and
+  never parse an `Authorization` header.
 
 ## Response shape
 
@@ -51,7 +59,14 @@ a fixed safe message per code.
   unlock.
 - **IDOR-safe**: single reports are queried by `{ id, userId }`; another user's id
   and a non-existent id return the **same** `404 RESOURCE_NOT_FOUND` (no existence
-  enumeration).
+  enumeration). The route id is strictly validated (safe charset, ≤128 chars)
+  **before** any query; malformed ids get `400 VALIDATION_ERROR` and never reach the DB.
+- **Two-stage premium read**: a metadata-only, owner-scoped query drives the
+  ownership + entitlement decision; the full premium JSON is read **only after** the
+  entitlement check passes. A locked premium report never reads its content columns.
+- **Bounded lists**: `/reports` and `/entitlements` are keyset-paginated (limit
+  default 20 / max 50, opaque length-capped cursor); no endpoint returns unbounded
+  history.
 - **AI provider** for consent status is resolved server-side; the client cannot
   specify provider / consentVersion / userId.
 - Production configuration and secrets are never read into DTOs or validated by

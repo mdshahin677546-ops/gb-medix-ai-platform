@@ -1,41 +1,24 @@
 import { prisma } from "@/lib/prisma";
-import {
-  newRequestId,
-  internalFailure,
-  success,
-  toEntitlementDTO
-} from "@/lib/api-v1";
-import { requireApiUser } from "@/lib/api-v1/session";
-import { respond } from "@/lib/api-v1/http";
+import { createEntitlementsHandler, type EntitlementQueryArgs } from "@/lib/api-v1";
+import { requireActiveVerifiedUser } from "@/lib/api-v1/session";
+import { toNextResponse } from "@/lib/api-v1/http";
 
 /**
- * GET /api/v1/entitlements — safe entitlement summary for the current user.
- * Read-only. Scoped to the authenticated user; a client cannot request another
- * user's entitlements. Payment / Stripe ids and internal audit fields are never
- * emitted (see toEntitlementDTO).
+ * GET /api/v1/entitlements — paginated, user-scoped entitlement summary.
+ * Active+verified. Ownership scope, safe projection, and pagination live in the
+ * tested handler; this adapter injects the real Prisma query.
  */
-export async function GET() {
-  const requestId = newRequestId();
-  try {
-    const auth = await requireApiUser(requestId);
-    if (!auth.ok) return respond(requestId, auth.failure);
+const handler = createEntitlementsHandler({
+  requireUser: requireActiveVerifiedUser,
+  queryEntitlements: (args: EntitlementQueryArgs) =>
+    prisma.entitlement.findMany(args as Parameters<typeof prisma.entitlement.findMany>[0])
+});
 
-    const rows = await prisma.entitlement.findMany({
-      where: { userId: auth.user.id },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: {
-        id: true,
-        productId: true,
-        resourceType: true,
-        resourceId: true,
-        status: true,
-        expiresAt: true
-      }
-    });
-
-    const entitlements = rows.map(toEntitlementDTO);
-    return respond(requestId, success({ entitlements }, requestId));
-  } catch {
-    return respond(requestId, internalFailure(requestId));
-  }
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  return toNextResponse(
+    await handler({
+      query: { limit: url.searchParams.get("limit"), cursor: url.searchParams.get("cursor") }
+    })
+  );
 }

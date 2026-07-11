@@ -27,6 +27,7 @@ export function buildApiHeaders(requestId: string): Record<string, string> {
   return {
     "X-Request-Id": requestId,
     "X-API-Version": API_VERSION,
-    "Cache-Control": "private, no-store"
+    "Cache-Control": "private, no-store",
+    "Content-Type": "application/json"
   };
 }

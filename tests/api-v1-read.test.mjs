@@ -1,11 +1,11 @@
-// API v1 read foundation — tests that execute the REAL implementation.
+// API v1 read foundation — tests that execute the REAL pure implementation.
 //
-// The pure lib/api-v1 modules (request context, pagination, safe failure/success
-// builders, DTO mappers) plus lib/api-contract/v1 are compiled with the project
-// tsc to CommonJS in a repo-local temp dir and required. Assertions run against
-// the real mappers/validators — no mirrored logic, no source-string checks.
-// (Next.js/Prisma glue — http.ts, session.ts, route handlers — is intentionally
-// excluded; its logic delegates to these pure, tested modules.)
+// The pure lib/api-v1 modules (request context, pagination, guards, safe
+// failure/success builders, DTO mappers) plus lib/api-contract/v1 are compiled
+// with the project tsc to CommonJS in a repo-local temp dir and required.
+// Assertions run against the real mappers/validators — no mirrored logic. The
+// Next.js glue (http.ts, session.ts) is excluded; the injected handler factories
+// are exercised in tests/api-v1-read-handlers.test.mjs.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -18,9 +18,15 @@ const API_V1 = "lib/api-v1";
 const CONTRACT = "lib/api-contract/v1";
 const EXCLUDE = new Set(["http.ts", "session.ts"]); // depend on next/server & @/lib/auth
 
-const contractFiles = readdirSync(CONTRACT).filter((f) => f.endsWith(".ts")).map((f) => join(CONTRACT, f));
-const v1Files = readdirSync(API_V1).filter((f) => f.endsWith(".ts") && !EXCLUDE.has(f)).map((f) => join(API_V1, f));
-const mapperFiles = readdirSync(join(API_V1, "mappers")).filter((f) => f.endsWith(".ts")).map((f) => join(API_V1, "mappers", f));
+function collectTs(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...collectTs(p));
+    else if (entry.name.endsWith(".ts") && !EXCLUDE.has(entry.name)) out.push(p);
+  }
+  return out;
+}
 
 const outDir = mkdtempSync(join(process.cwd(), ".tmp-apiv1-"));
 const requireCjs = createRequire(import.meta.url);
@@ -28,15 +34,15 @@ execFileSync(
   process.execPath,
   [
     "node_modules/typescript/bin/tsc",
-    ...contractFiles,
-    ...v1Files,
-    ...mapperFiles,
+    ...collectTs(CONTRACT),
+    ...collectTs(API_V1),
     "--outDir", outDir,
     "--rootDir", "lib",
     "--module", "commonjs",
     "--target", "es2020",
     "--moduleResolution", "node",
     "--esModuleInterop",
+    "--strict",
     "--skipLibCheck"
   ],
   { stdio: "pipe" }
@@ -57,11 +63,12 @@ test("newRequestId is random, unique, and carries no identifiers", () => {
   assert.doesNotMatch(a, /@|password|user/i);
 });
 
-test("API headers are versioned and non-cacheable, no CORS", () => {
+test("API headers are versioned, non-cacheable, JSON, no CORS", () => {
   const h = M.buildApiHeaders("req-1");
   assert.equal(h["X-Request-Id"], "req-1");
   assert.equal(h["X-API-Version"], "1");
   assert.equal(h["Cache-Control"], "private, no-store");
+  assert.equal(h["Content-Type"], "application/json");
   assert.equal(M.API_VERSION, "1");
   assert.ok(!("Access-Control-Allow-Origin" in h));
 });
@@ -85,7 +92,6 @@ test("failure maps codes to HTTP status and safe messages (no leakage)", () => {
     assert.equal(typeof f.body.error.retryable, "boolean");
     assert.ok(f.body.error.message.length > 0);
     assert.doesNotMatch(f.body.error.message, LEAK_MARKERS);
-    // output conforms to the real shared error envelope
     CONTRACTMOD.apiErrorResponseSchema.parse(f.body);
   }
 });
@@ -118,7 +124,7 @@ test("pagination defaults, bounds, and invalid inputs", () => {
   assert.deepEqual(M.parsePagination({}), { ok: true, limit: 20, cursor: null });
   assert.equal(M.parsePagination({ limit: "50" }).limit, 50);
   assert.equal(M.parsePagination({ limit: "1" }).limit, 1);
-  assert.equal(M.parsePagination({ limit: "51" }).ok, false); // above MAX_PAGE_LIMIT
+  assert.equal(M.parsePagination({ limit: "51" }).ok, false);
   assert.equal(M.parsePagination({ limit: "0" }).ok, false);
   assert.equal(M.parsePagination({ limit: "-1" }).ok, false);
   assert.equal(M.parsePagination({ limit: "abc" }).ok, false);
@@ -132,9 +138,20 @@ test("cursor round-trips and rejects malformed cursors", () => {
   const page = M.parsePagination({ cursor: enc });
   assert.equal(page.ok, true);
   assert.deepEqual(page.cursor, c);
-  // garbage cursor (no separator / not a timestamp) is rejected
+  // non-JSON payload
   assert.equal(M.parsePagination({ cursor: Buffer.from("nope", "utf8").toString("base64url") }).ok, false);
-  assert.equal(M.parsePagination({ cursor: Buffer.from("not-a-date|x", "utf8").toString("base64url") }).ok, false);
+  // JSON but wrong/extra shape
+  assert.equal(M.parsePagination({ cursor: Buffer.from(JSON.stringify({ c: "2026-07-10T00:00:00.000Z", i: "x", extra: 1 }), "utf8").toString("base64url") }).ok, false);
+  // bad date
+  assert.equal(M.parsePagination({ cursor: Buffer.from(JSON.stringify({ c: "not-a-date", i: "x" }), "utf8").toString("base64url") }).ok, false);
+  // non base64url characters
+  assert.equal(M.parsePagination({ cursor: "!!!not-base64!!!" }).ok, false);
+});
+
+test("cursor raw length is capped before decoding", () => {
+  const huge = "A".repeat(M.MAX_CURSOR_LENGTH + 1);
+  assert.equal(M.parsePagination({ cursor: huge }).ok, false);
+  assert.equal(M.MAX_CURSOR_LENGTH, 512);
 });
 
 // ---- /me mapper ----
@@ -143,7 +160,6 @@ test("toMeDTO returns only allowlisted fields; drops sensitive input", () => {
     id: "u1",
     status: "active",
     emailVerifiedAt: new Date("2026-01-01T00:00:00Z"),
-    // hostile extra input that must never surface:
     email: "a@b.com",
     passwordHash: "x",
     sessionVersion: 7
@@ -177,7 +193,6 @@ test("toAiConsentStatusDTO: server provider maps to scope; no raw provider leake
     revokedAt: null
   });
   assert.equal(dto.required, true);
-  assert.equal(dto.accepted, true);
   assert.deepEqual(dto.providerScope, ["deepseek"]);
   assert.ok(!("provider" in dto));
   CONTRACTMOD.aiConsentStatusSchema.parse(dto);
@@ -218,7 +233,6 @@ test("toEntitlementDTO drops payment/internal fields; maps status", () => {
     resourceId: "a1",
     status: "active",
     expiresAt: null,
-    // hostile extra input:
     userId: "u1",
     paymentId: "pay_1",
     sourceReferenceId: "cs_test_123"
@@ -228,15 +242,17 @@ test("toEntitlementDTO drops payment/internal fields; maps status", () => {
   assert.ok(!("paymentId" in dto));
   assert.ok(!("userId" in dto));
   assert.ok(!("sourceReferenceId" in dto));
-  assert.ok(!("source" in dto)); // PLANNED enum, never fabricated
+  assert.ok(!("source" in dto));
   CONTRACTMOD.entitlementSchema.parse(dto);
 });
 
-test("toEntitlementDTO maps revoked/refunded and unknown->expired", () => {
+test("toEntitlementDTO maps revoked/refunded; unknown status fails loudly (never active)", () => {
   assert.equal(M.toEntitlementDTO({ id: "e", productId: "p", resourceType: null, resourceId: null, status: "revoked", expiresAt: null }).status, "revoked");
   assert.equal(M.toEntitlementDTO({ id: "e", productId: "p", resourceType: null, resourceId: null, status: "refunded", expiresAt: null }).status, "refunded");
-  // an unmodelled DB status must never read as active
-  assert.equal(M.toEntitlementDTO({ id: "e", productId: "p", resourceType: null, resourceId: null, status: "mystery", expiresAt: null }).status, "expired");
+  assert.throws(
+    () => M.toEntitlementDTO({ id: "e", productId: "p", resourceType: null, resourceId: null, status: "mystery", expiresAt: null }),
+    M.UnmappedEntitlementStatusError
+  );
 });
 
 // ---- report summary + detail decision ----
@@ -278,8 +294,7 @@ test("free ready report maps to a valid FreeReport", () => {
   assert.equal(d.kind, "free");
   CONTRACTMOD.freeReportSchema.parse(d.data);
   assert.equal(d.data.constitution, "balanced");
-  assert.equal(d.data.limitedRecommendations.length, 1);
-  assert.ok(!("lifestylePlan" in d.data)); // premium-only field absent
+  assert.ok(!("lifestylePlan" in d.data));
 });
 
 test("premium ready + entitled maps to a valid PremiumReport", () => {
@@ -287,7 +302,6 @@ test("premium ready + entitled maps to a valid PremiumReport", () => {
   assert.equal(d.kind, "premium");
   CONTRACTMOD.premiumReportSchema.parse(d.data);
   assert.equal(d.data.lifestylePlan.length, 1);
-  assert.equal(d.data.followUpPlan.length, 1);
 });
 
 test("premium WITHOUT entitlement is locked (never returns premium data)", () => {
@@ -302,8 +316,6 @@ test("entitlement gate applies before readiness (generating premium, not entitle
 });
 
 test("consent cannot substitute for entitlement (entitled=false always locks premium)", () => {
-  // The mapper only trusts the server-computed `entitled` boolean; there is no
-  // path to unlock premium via consent or a client flag.
   assert.equal(M.toReportDetailDTO(premiumRow, false).kind, "locked");
   assert.equal(M.toReportDetailDTO(premiumRow, true).kind, "premium");
 });

@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
-import { buildApiHeaders } from "./request-context";
-import type { ApiFailure, ApiOk } from "./failure";
+import type { HandlerResult } from "./handler-result";
 
 /**
- * Next.js response glue for /api/v1. Imports next/server, so it is kept OUT of
- * the pure barrel (lib/api-v1/index.ts). Applies the standard headers
- * (X-Request-Id, X-API-Version, Cache-Control: private, no-store) to every reply.
+ * Next.js adapter for /api/v1 (imports next/server, so it is kept OUT of the pure
+ * barrel). Turns a framework-agnostic HandlerResult into a NextResponse, applying
+ * the handler's status and headers (X-Request-Id, X-API-Version, Cache-Control,
+ * Content-Type) verbatim.
  */
-export function respond<TData>(
-  requestId: string,
-  result: ApiOk<TData> | ApiFailure
-): NextResponse {
+export function toNextResponse(result: HandlerResult): NextResponse {
   return NextResponse.json(result.body, {
     status: result.status,
-    headers: buildApiHeaders(requestId)
+    headers: result.headers
   });
 }
