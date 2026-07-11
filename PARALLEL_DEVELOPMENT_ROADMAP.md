@@ -1,113 +1,162 @@
 # GB MEDIX AI — Parallel Development Roadmap
 
-编制：Claude Code（Lead Developer）　|　日期：2026-07-10　|　基线：`main`（规划分支 `plan/mobile-agent-parallel-roadmap`）
+编制：Claude Code（Lead Developer）　|　日期：2026-07-10　|　分支：`plan/mobile-agent-parallel-roadmap`　|　基线 `origin/main` = `750f119`
 
-> 本文件为多线并行研发的总排期。**本阶段仅规划，不改业务代码 / Schema / API / 支付 / 权限 / 生产配置。** 所有品牌名统一为 **GB MEDIX AI**（不再使用旧版本号品牌名作为主标题）。
-
----
-
-## 0. 五条任务线总览
-
-| 线 | 分支 | 目标 | 风险等级 |
-|---|---|---|---|
-| 生产盈利线 | `main`（仅审核通过改动）+ `fix/production-*` | 小流量持续收费与真实用户验证 | 高（触碰生产） |
-| Web 增长线 | `feature/sprint-2a-growth-conversion` | 转化与商业化增长 | 中 |
-| 手机 App 线 | `feature/mobile-app-foundation` | iOS/Android 统一 App | 中 |
-| AI 智能体线 | `feature/ai-consultation-agent` | 多轮、可追踪、可审计问诊工作流 | 高（AI + 健康数据） |
-| 共享契约线 | `feature/shared-api-contract` | 固定 Web/App/Agent 共用 API/Schema/Auth/Consent/Report/Entitlement 契约 | 高（跨端地基） |
-
-**依赖关系**：共享契约线是其余各线的地基，必须**先行并保持稳定**；App 线与 Agent 线均依赖契约线冻结的接口与错误码。
+> **本轮仅规划文档。** 不改业务代码、不改 Prisma Schema、不建 migration、不改生产配置、不合并 `main`。品牌统一 **GB MEDIX AI**。
+>
+> 标签约定：**EXISTING**（代码中已存在，经检查）· **PLANNED**（本次规划、尚未实现）· **BLOCKED**（被外部/依赖阻塞）· **REQUIRES_DECISION**（需 ChatGPT/用户决策）。禁止把 PLANNED 写成 EXISTING。
 
 ---
 
-## 1. 生产盈利线（Production Profit Line）
+## 1. 当前系统基线（基于真实代码检查）
 
-### 当前已具备
-注册与邮箱验证 · 第三方 AI Consent · DeepSeek / AIHubMix（经中转 + 模型路由）· 免费健康评估 · Free Report · Premium Report · Stripe 支付 · Entitlement · 退款撤权。
+生产 `https://ai.gbmedix.com`；GitHub `mdshahin677546-ops/gb-medix-ai-platform`；本地 `E:\GB医疗AI问诊+供应链`。
 
-### 目标
-在不影响研发的前提下，持续小流量收费与真实用户验证，稳定产生营收信号。
+| 能力 | 状态 | 依据 |
+|---|---|---|
+| Next.js 14 App Router + React 18 + TypeScript | EXISTING | `package.json`、`app/**` |
+| Tailwind CSS | EXISTING | `tailwind.config.ts` |
+| Prisma + PostgreSQL/Neon | EXISTING | `prisma/schema.prisma`（postgresql） |
+| Vercel 部署 | EXISTING | `vercel.json`、生产在线 |
+| Stripe（Checkout + Webhook） | EXISTING | `app/api/checkout`、`app/api/webhooks/stripe` |
+| Resend 邮件 | EXISTING | `lib/email/*`、`EMAIL_PROVIDER=resend` |
+| AIHubMix 中转 + 模型路由 | EXISTING（生产配置） | `DEEPSEEK_BASE_URL` 指向中转；隐私说明已披露 |
+| DeepSeek Provider Adapter（OpenAI-compatible） | EXISTING | `lib/ai/providers/openai-compatible.ts`、`provider-factory.ts`（代码默认 `deepseek-chat`；生产 `DEEPSEEK_MODEL=baidu-deepseek-v4-pro`） |
+| 邮箱验证 | EXISTING | `app/api/auth/{send-verification,verify-email}`、`EmailVerification` 模型 |
+| AI Consent Gate | EXISTING | `lib/ai-consent/*`、`app/api/ai-consent/*`、`AIProcessingConsent` 模型 |
+| Free / Premium Report | EXISTING | `app/api/reports/generate`、`reports/[id]`、`AIReport`、`lib/report-schema.ts` |
+| Payment / Entitlement（含退款撤权） | EXISTING | `Entitlement`/`PaymentRecord`、`lib/entitlement/*`、webhook 撤权 |
+| `sessionVersion` 会话吊销 | EXISTING | `User.sessionVersion`、`lib/auth.ts` |
+| 结构化输出健壮化（顶层单对象 + Zod + 安全 502 + 诊断 allowlist） | EXISTING | `openai-compatible.ts`、`lib/ai/diagnostics.ts`（main `a54f8f7`/`750f119`） |
+| 生产小流量运行 | EXISTING | 公开面 200 |
+| 现有模型 | EXISTING | `User, Merchant, Product, TCMRecord, PaymentRecord, RFQRecord, AssistantSession, Doctor, ConsultationOrder, Entitlement, AIUsage, AIProcessingConsent, DoctorVerification, PatientConsent, Conversation, Message, AIReport, ProductRecommendation, EmailVerification` |
+| `Conversation` / `Message` 模型 | EXISTING（基础表已在） | 多轮 Agent 运行/状态/审计模型（`AgentRun` 等）为 PLANNED |
+| `/api/v1/` 版本化 / `/api/mobile/*` | PLANNED | 现有路由在 `app/api/**`，无版本前缀/移动端口 |
+| `familyMemberId` 家庭档案 | PLANNED | 模型中不存在 |
+| CI（`.github/workflows`） | BLOCKED / REQUIRES_DECISION | **无 CI 工作流**，建议补建（见 §7） |
+| 完整 i18n 目录 | PLANNED | 现为 `lib/lang.ts` 简单方案 |
 
-### 生产保护规则（硬约束）
-1. `main` **仅接受 Codex 审核通过**的改动。
-2. **线上 P0 优先于所有新功能**：出现 P0 时，所有研发线暂停协助，集中处置。
-3. 生产修复走独立分支 `fix/production-*`，单独审核、单独合并。
-4. **功能分支不得直接修改生产配置**（env、Vercel、Neon、Stripe/Resend/Provider 配置）。
-5. 高风险模块（Stripe / Auth / Entitlement / Consent / AIReport）改动必须经 Codex 审。
-6. 公共数据库 migration 必须**单独评审**，不得夹带在功能 PR 中。
-
----
-
-## 2. Web 增长线 — `feature/sprint-2a-growth-conversion`
-
-| 任务 | 说明 |
-|---|---|
-| Analytics 埋点 | 统一事件模型（页面/转化/AI 调用/支付节点），隐私合规 |
-| 用户漏斗 | 注册→验证→评估→Free→Premium→复访 全漏斗度量 |
-| Landing 转化优化 | 首屏、CTA、信任要素、A/B 结构 |
-| Free/Premium 报告转化 | Free→Premium 解锁路径与话术优化 |
-| 邮件自动触达 | 验证后、评估后、报告后、复访自动化序列（Resend） |
-| 报告复访 | 报告页复访入口与提醒 |
-| AI 商品推荐入口 | 报告内商品推荐入口（只从真实 Product 数据） |
-| 多语言优化 | 补齐仍复用英文的语言文案 |
-
----
-
-## 3. 手机 App 线 — `feature/mobile-app-foundation`
-目标：iOS / Android 统一 App（React Native + Expo）。详见 `MOBILE_APP_IMPLEMENTATION_PLAN.md`。**App 不另建后端，复用现有 GB MEDIX AI API 与生产数据库。**
-
-## 4. AI 智能体线 — `feature/ai-consultation-agent`
-目标：多轮、可追踪、可审计的 AI 健康问诊工作流。详见 `AI_AGENT_CONSULTATION_PLAN.md`。
-
-## 5. 共享契约线 — `feature/shared-api-contract`
-目标：固定 Web/App/Agent 共用的 API、Schema、认证、Consent、Report、Entitlement 契约。详见 `SHARED_WEB_MOBILE_API_CONTRACT.md`。
+> 产品定位：多语言 AI 健康管理 · AI 智能健康问诊 · 个性化健康报告 · 健康产品与供应链 · 中医体质 + 现代生活方式。**禁止**：疾病诊断 / 自动处方 / 治疗承诺 / 疾病概率预测 / 自动分诊结论 / 替代医生。
 
 ---
 
-## 6. 四周并行排期
+## 2. 四条并行工作线
 
-> 每项标注：**Owner** · **前置依赖** · **输出文件** · **验收标准** · **是否影响数据库** · **是否高风险**。Owner 为执行角色（Claude Code 执行、Codex 审、ChatGPT 验收）。
+### A. 生产盈利线
+保持生产 `main` 稳定；继续小流量真实收费；**只优先修复阻断类**（5xx、邮件、支付、AI、认证、权限、数据安全）。P0 优先于一切新功能。
 
-### 第 1 周 — 地基（共享契约 / App 基础 / Agent 基础 / Web 埋点）
+### B. Web 增长线 — `feature/sprint-2a-growth-conversion`
+Analytics 埋点 · 漏斗分析 · Landing 优化 · 注册转化 · 评估完成率 · Free→Premium 转化 · Stripe Checkout 转化 · 支付解锁 · 邮件自动触达 · 报告复访 · 多语言 · 产品推荐入口。
 
-| 任务 | Owner | 前置依赖 | 输出文件 | 验收标准 | 影响 DB | 高风险 |
+**事件（至少）**：`landing_view · signup_start · signup_complete · email_verified · assessment_start · assessment_complete · free_report_view · premium_click · checkout_start · payment_success · report_unlocked · refund`。
+
+每个事件定义：触发位置 · 必要字段 · **禁止上传的健康敏感字段**（问卷答案/睡眠/情绪/身体感受原文、报告原文、email、userId）· 去重规则 · 服务端 vs 客户端边界 · 转化漏斗定义 · 最小 Dashboard。全部 PLANNED。
+
+### C. 手机 App 线 — `feature/mobile-app-foundation`
+RN · Expo · TS · Expo Router · EAS Build · SecureStore。硬约束：**不是 WebView 壳** · 不另建账户/数据库 · 不直调 AIHubMix/DeepSeek/OpenAI · 不直连 PostgreSQL · 统一调用 GB MEDIX AI 后端 API。详见 `MOBILE_APP_IMPLEMENTATION_PLAN.md`。全部 PLANNED。
+
+### D. AI 智能体线 — `feature/ai-consultation-agent`
+单轮/简单问答升级为：多轮 · 可追踪 · 可恢复 · 可审计 · Web/App 共用 · 健康管理而非诊断。详见 `AI_AGENT_CONSULTATION_PLAN.md`。（`Conversation/Message` EXISTING；运行/状态/审计模型 PLANNED。）
+
+### E. 共享契约线 — `feature/shared-api-contract`
+固定 Web/App/Agent 共用账户、Consent、Conversation、Report、Entitlement、Product、AIUsage、Provider 契约与 `/api/v1/`。详见 `SHARED_WEB_MOBILE_API_CONTRACT.md`。
+
+**为何契约必须优先/同步**：App 与 Agent 都消费同一套认证/错误码/Report/Entitlement/Consent 语义；不先冻结会各自定义 DTO 与错误码导致分叉返工。故契约线 W1 先冻结错误码 + 认证 + 基础类型，其余接口与三线同步细化。
+
+---
+
+## 3. 四周执行安排
+
+> 每项：Owner（执行=Claude Code，审=Codex，验收=ChatGPT）· 依赖 · 交付物 · 验收 · 是否影响 DB · 是否高风险。
+
+### Week 1（地基）
+| 任务 | 线 | 依赖 | 交付物 | 验收 | DB | 高风险 |
 |---|---|---|---|---|---|---|
-| 冻结 API 契约 v1（Auth/Consent/Assessment/Report/Entitlement/Errors） | Claude Code | 无 | `SHARED_WEB_MOBILE_API_CONTRACT.md` + 契约测试骨架 | Codex 通过；错误码固定 | 否 | 是 |
-| Mobile Monorepo 脚手架（Expo + packages） | Claude Code | 契约草案 | `apps/mobile/` `packages/*` 骨架 | Expo 启动、类型贯通 | 否 | 否 |
-| Agent 数据模型草案（无 migration） | Claude Code | 契约草案 | Agent schema 设计稿（文档） | 模型/索引/隔离/幂等已定义 | 否（仅设计） | 是 |
-| Web Analytics 埋点框架 | Claude Code | 无 | 埋点事件表 + 实现 | 关键事件可采集、隐私合规 | 否 | 否 |
+| Analytics 基础 + 漏斗事件 | Web | — | 事件表+实现 | 12 事件可采、无敏感字段 | 否 | 中 |
+| Expo 工程 + API Client + Auth + SecureStore + 导航 | App | 契约草案 | `apps/mobile`+`packages/*` 骨架 | Expo 启动、类型贯通 | 否 | 中 |
+| `Conversation/Message` 设计 + Intake + Safety | Agent | 契约草案 | Agent 设计稿+状态机骨架 | Safety 拦截生效 | 否（设计） | 高 |
+| 错误码 + 认证 + 基础类型契约冻结 | Shared | — | 契约文档+契约测试骨架 | Codex 通过、码固定 | 否 | 高 |
 
-### 第 2 周 — App 登录与评估 / Agent 多轮问诊 / Web 转化
-
-| 任务 | Owner | 前置依赖 | 输出文件 | 验收标准 | 影响 DB | 高风险 |
+### Week 2
+| 任务 | 线 | 依赖 | 交付物 | 验收 | DB | 高风险 |
 |---|---|---|---|---|---|---|
-| Mobile Auth（token/refresh/SecureStore/deep link 验证） | Claude Code | Auth 契约 | mobile auth 模块 | 登录/刷新/吊销/退出全设备可用 | 否（复用现有 User.sessionVersion） | 是 |
-| App 健康评估流（Consent→评估→Free Report） | Claude Code | 契约冻结 | mobile 评估页 | 与 Web 同结果、同 Consent 门禁 | 否 | 中 |
-| Agent 多轮问诊（Intake+Safety 状态机） | Claude Code | Agent 模型评审 | agent 工作流实现（feature 分支） | 状态机可跑、Safety 拦截生效 | 是（需评审 migration） | 是 |
-| Web 转化优化（Landing/Free→Premium） | Claude Code | 埋点 | web 转化改动 | 漏斗指标可对比 | 否 | 中 |
+| Landing+Premium+邮件触达优化 | Web | W1 埋点 | Web 改动 | 漏斗可对比 | 否 | 中 |
+| 登录+邮箱验证+Consent+AI 对话+评估 | App | 契约冻结 | mobile 页面 | 与 Web 同门禁/结果 | 否 | 高 |
+| TCM Wellness+Lifestyle Plan+多轮摘要 | Agent | Agent 模型评审 | agent 实现 | 多轮可跑、摘要正确 | 是（评审 migration） | 高 |
+| Report+Consent+Conversation 契约 | Shared | W1 契约 | 契约细化 | Codex 通过 | 否 | 高 |
 
-### 第 3 周 — App 报告 / Agent 计划与回访 / 商品推荐
-
-| 任务 | Owner | 前置依赖 | 输出文件 | 验收标准 | 影响 DB | 高风险 |
+### Week 3
+| 任务 | 线 | 依赖 | 交付物 | 验收 | DB | 高风险 |
 |---|---|---|---|---|---|---|
-| App 报告（Free/Premium + Entitlement 状态 + 历史） | Claude Code | Report 契约 | mobile 报告页 | Premium 经 Entitlement、IDOR 安全 | 否 | 是 |
-| Agent 计划生成 + Follow-up 回访 | Claude Code | Agent 多轮 | plan/follow-up 实现 | 7/30 天计划、回访任务可追踪 | 是（评审） | 是 |
-| 商品推荐入口（Web+App，仅真实 Product） | Claude Code | Product 契约 | 推荐入口 | 无虚构商品、locale/availability 正确 | 否 | 中 |
+| 产品推荐入口+留存 | Web | Product 契约 | Web 改动 | 仅真实 Product | 否 | 中 |
+| Free/Premium Report+历史+用户中心+多语言+Beta Build | App | Report 契约 | mobile 页面+EAS Beta | Premium 经 Entitlement、IDOR 安全 | 否 | 高 |
+| Follow-up+7 天计划+Product Recommendation | Agent | W2 | agent 实现 | 回访可追踪、不虚构商品 | 是（评审） | 高 |
+| Entitlement+Product+AIUsage 契约 | Shared | W2 | 契约细化 | Codex 通过 | 否 | 高 |
 
-### 第 4 周 — 三端联调 / Beta / 权限与安全审查
-
-| 任务 | Owner | 前置依赖 | 输出文件 | 验收标准 | 影响 DB | 高风险 |
+### Week 4（联调+测试+Beta）
+| 任务 | 线 | 依赖 | 交付物 | 验收 | DB | 高风险 |
 |---|---|---|---|---|---|---|
-| Web/App/Agent 联调（同一 Conversation/Report/Entitlement） | Claude Code | 三线产物 | 联调报告 | Web 起、App 续、状态一致 | 否 | 是 |
-| Beta 打包（EAS Build，内测） | Claude Code | App 完成 | Beta 构建 | iOS/Android 内测可装 | 否 | 中 |
-| 权限与安全审查（Codex） | Codex | 全部 | 安全审查报告 | Stripe/Auth/Entitlement/Consent/AIReport 全绿 | — | 是 |
+| Web/App/Agent 联调 | 全 | 三线产物 | 联调报告 | Web 起、App 续、状态一致 | 否 | 高 |
+| 权限/数据隔离/安全/性能测试 | 全 | 联调 | 测试报告 | IDOR/隔离/限流全绿 | 否 | 高 |
+| Beta 用户测试 + 受控 App 内测 | App | EAS Beta | 内测反馈 | iOS/Android 可装 | 否 | 中 |
+
+任一周触发线上 P0，按生产盈利线规则**优先处置生产**，排期顺延。
 
 ---
 
-## 7. 里程碑验收（ChatGPT）
-- W1：契约 v1 冻结 + 三线地基就绪。
-- W2：App 可登录并跑通评估；Agent 多轮问诊可用。
-- W3：App 报告 + Agent 计划/回访 + 商品推荐入口。
-- W4：三端联调通过 + Beta + 安全审查通过。
+## 4. 依赖关系
 
-任何一周若触发线上 P0，按第 1 节规则**优先处置生产**，排期顺延。
+```mermaid
+graph TD
+  SharedAPI[Shared API 契约] --> Mobile[手机 App]
+  SharedAPI --> Agent[AI 智能体]
+  SharedAPI --> Web[Web 增长]
+  Consent[AI Consent Gate] --> Agent
+  Provider[AI Provider Adapter / AIHubMix] --> Agent
+  UserSystem[账户 + sessionVersion] --> Mobile
+  UserSystem --> Agent
+  Entitlement --> PremiumReport[Premium Report]
+  PremiumReport --> Mobile
+  RealProductDB[真实 Product 数据库] --> ProductRec[Product Recommendation]
+  ProductRec --> Agent
+  ProductRec --> Web
+  StorePolicy[Apple/Google 支付政策] --> MobilePay[App 支付]
+  MobilePay --> Mobile
+```
+
+Shared API ← App/Agent/Web；Agent ← Consent + Provider + 账户；Premium Report ← Entitlement；Product Recommendation ← 真实 Product DB；App 支付 ← Apple/Google 政策（REQUIRES_DECISION）。
+
+---
+
+## 5. 风险登记表
+
+| 风险 | 等级 | 触发条件 | 预防 | 检测 | 回滚 | 负责人 |
+|---|---|---|---|---|---|---|
+| Web/App 认证割裂 | 高 | 两端各建 session | 统一 `sessionVersion`+共享契约 | 契约测试 | 回退 App auth 分支 | Claude Code |
+| Consent 状态不一致 | 高 | 端各存 consent | 后端唯一真相、统一 Gate | 一致性测试 | 强制读后端 | Claude Code |
+| Premium 权益绕过 | 高 | 端内判断权益 | Entitlement 后端强校验(402) | IDOR/权益测试 | 关闭端内解锁 | Codex 审 |
+| AI 诊断化 | 高 | 输出诊断/处方 | medicalSafetyPrompt+Safety Agent | 质量测试集 | 拦截并回退 prompt | Claude Code |
+| App Store 数字内容支付合规 | 高 | App 内售数字内容 | Beta 不内置数字购买 | 政策评审 | 移除购买入口 | REQUIRES_DECISION |
+| Prisma migration 冲突 | 中 | 并行分支各改 schema | migration 单独评审、串行 | `migrate status` | 恢复快照 | Codex 审 |
+| 多分支并行冲突 | 中 | 高风险代码跨分支复制 | 契约先行、禁止未审复制 | PR 审 | rebase/还原 | Codex |
+| 健康数据泄露 | 高 | 日志/埋点含健康原文 | 数据最小化+allowlist 日志 | 日志审计 | 撤下泄露路径 | Claude Code |
+| Provider 输出非法 JSON | 中 | 中转/模型坏 JSON | 顶层单对象+Zod+安全 502 | 单测覆盖 | 保持安全 502 | EXISTING 已缓解 |
+| 产品推荐虚构商品/功效 | 高 | 模型自造 SKU/功效 | 只从真实 Product DB | 推荐测试 | 关闭推荐 | Codex 审 |
+| Analytics 上传敏感健康数据 | 高 | 埋点带健康字段 | 埋点字段 allowlist | 埋点审计 | 停用事件 | Claude Code |
+| 生产与开发配置串用 | 高 | 功能分支改生产配置 | 功能分支禁改生产配置 | 配置审查 | 还原配置 | Codex 审 |
+
+---
+
+## 6. 分支与审核策略
+- `main` **仅保留生产稳定版本**，仅接受 Codex 审核通过的改动。
+- 公共 Schema **migration 必须独立审核**（不夹带功能 PR）。
+- **Stripe/Auth/Entitlement/Consent/AIReport 必须 Codex 审核**。
+- 不允许未经审核**跨分支复制高风险代码**。
+- **禁止 force push `main`**；共享分支禁止 `reset --hard` / `push --force[-with-lease]`。
+- 每条分支独立测试 + 报告。
+
+## 7. REQUIRES_DECISION / BLOCKED 汇总
+- **CI 缺失**：无 `.github/workflows`，建议补建（tsc/test/build 门禁）——需 ChatGPT 定优先级。
+- **App 内数字内容支付**：Apple IAP / Google Play Billing / Stripe 分工需法律 + 商店政策确认。
+- **familyMemberId 家庭档案**：需 schema 决策（migration 单独评审）。
+- **`/api/v1/` 迁移节奏**：是否引入 BFF、弃用期限待确认。
