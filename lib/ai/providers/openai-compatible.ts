@@ -79,15 +79,29 @@ export class OpenAICompatibleProvider implements AIProvider {
     input: StructuredJSONRequest<TSchema>
   ): Promise<AIProviderResult<z.output<TSchema>>> {
     const minimalPayload = buildMinimalHealthPayload(input.payload);
-    const completion = await this.client.chat.completions.create({
-      model: this.model,
-      temperature: input.temperature ?? 0.4,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: input.systemPrompt },
-        { role: "user", content: JSON.stringify(minimalPayload) }
-      ]
-    });
+    const messages = [
+      { role: "system", content: input.systemPrompt },
+      { role: "user", content: JSON.stringify(minimalPayload) }
+    ] as any;
+    let completion;
+    try {
+      completion = await this.client.chat.completions.create({
+        model: this.model,
+        temperature: input.temperature ?? 0.4,
+        response_format: { type: "json_object" },
+        messages
+      });
+    } catch (error) {
+      if (!shouldRetryWithoutJsonObject(error)) {
+        throw error;
+      }
+
+      completion = await this.client.chat.completions.create({
+        model: this.model,
+        temperature: input.temperature ?? 0.4,
+        messages
+      });
+    }
 
     const content = completion.choices[0]?.message.content || "";
     // Some OpenAI-compatible providers (e.g. DeepSeek) may wrap the JSON in a
@@ -121,6 +135,41 @@ export class OpenAICompatibleProvider implements AIProvider {
       model: this.model
     };
   }
+}
+
+function shouldRetryWithoutJsonObject(error: unknown) {
+  const status = getErrorNumber(error, "status");
+  if (status !== 400 && status !== 422) return false;
+
+  const text = getErrorText(error).toLowerCase();
+  return (
+    text.includes("response_format") ||
+    text.includes("json_object") ||
+    text.includes("structured output") ||
+    text.includes("structured_outputs") ||
+    text.includes("not support") ||
+    text.includes("unsupported")
+  );
+}
+
+function getErrorText(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error !== "object" || error === null) return "";
+
+  const obj = error as Record<string, unknown>;
+  const nested =
+    typeof obj.error === "object" && obj.error !== null
+      ? (obj.error as Record<string, unknown>)
+      : null;
+  return [obj.message, obj.code, obj.type, nested?.message, nested?.code, nested?.type]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+}
+
+function getErrorNumber(error: unknown, key: string) {
+  if (typeof error !== "object" || error === null) return undefined;
+  const value = (error as Record<string, unknown>)[key];
+  return typeof value === "number" ? value : undefined;
 }
 
 /**
