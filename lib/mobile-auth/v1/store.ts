@@ -1,9 +1,21 @@
 import {
   isSessionTimeExpired,
+  hasValidSessionInvariants,
+  isSafeTimestamp,
+  isSafeCounter,
+  MAX_ROTATION_COUNTER,
   type DeviceSession,
   type RevokeReason
 } from "./device-session";
 import { classifyRefreshLookup, type RefreshLookup } from "./rotation";
+
+/** Thrown by createSession on invalid/corrupt input. Message is fixed and value-free. */
+export class DeviceSessionInvariantError extends Error {
+  constructor() {
+    super("Invalid device session state.");
+    this.name = "DeviceSessionInvariantError";
+  }
+}
 
 /**
  * DeviceSession Store interface + an in-memory reference implementation used by
@@ -25,7 +37,12 @@ export type CreateSessionInput = {
   createdAt: number;
   idleExpiresAt: number;
   absoluteExpiresAt: number;
-  /** Optional starting counter (e.g. rehydrating a stored session). Defaults to 0. */
+  /**
+   * Optional starting counter for rehydrating a stored session. Defaults to 0.
+   * In production this may ONLY come from a trusted database record, and even
+   * then it is re-validated here (safe non-negative integer, <= MAX_ROTATION_COUNTER);
+   * a corrupt / non-finite value fails closed (DeviceSessionInvariantError).
+   */
   rotationCounter?: number;
 };
 
@@ -44,11 +61,8 @@ export type RotateResult =
   | { status: "not_found" }
   | { status: "not_active" }
   | { status: "expired" }
-  /** Programmer/time error (non-finite/non-integer/out-of-range input). Carries no echoed value. */
+  /** Corrupt/invalid state or time input (non-finite/non-integer/out-of-range). Carries no echoed value. */
   | { status: "invalid_input" };
-
-/** Guard against rotationCounter reaching an unsafe (non-exact) integer region. */
-export const MAX_ROTATION_COUNTER = Number.MAX_SAFE_INTEGER - 1;
 
 export interface DeviceSessionStore {
   findById(id: string): Promise<DeviceSession | null>;
@@ -86,11 +100,23 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
 
   async createSession(input: CreateSessionInput): Promise<DeviceSession> {
     if (this.byId.has(input.id)) {
-      throw new Error("Device session id already exists.");
+      throw new DeviceSessionInvariantError();
     }
     const startCounter = input.rotationCounter ?? 0;
-    if (!Number.isInteger(startCounter) || startCounter < 0) {
-      throw new Error("Invalid rotationCounter.");
+    // Validate ALL numeric fields + time relations BEFORE any Map write (fail
+    // closed; no partial session, no echoed input). Client input is NEVER treated
+    // as trusted rehydration.
+    if (
+      !isSafeTimestamp(input.createdAt) ||
+      !isSafeTimestamp(input.idleExpiresAt) ||
+      !isSafeTimestamp(input.absoluteExpiresAt) ||
+      !isSafeCounter(startCounter) ||
+      startCounter > MAX_ROTATION_COUNTER ||
+      input.idleExpiresAt <= input.createdAt ||
+      input.absoluteExpiresAt <= input.createdAt ||
+      input.idleExpiresAt > input.absoluteExpiresAt
+    ) {
+      throw new DeviceSessionInvariantError();
     }
     const session: DeviceSession = {
       id: input.id,
@@ -111,31 +137,41 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
   }
 
   async rotateRefreshTokenAtomically(input: RotateInput): Promise<RotateResult> {
-    // Validate time inputs BEFORE touching any session state (fail closed, no echo).
-    if (!Number.isInteger(input.now) || input.now < 0) return { status: "invalid_input" };
-    if (!Number.isInteger(input.newIdleExpiresAt)) return { status: "invalid_input" };
+    // 1. Validate REQUEST inputs (fail closed, no echoed value).
+    if (!isSafeTimestamp(input.now)) return { status: "invalid_input" };
+    if (!Number.isSafeInteger(input.newIdleExpiresAt)) return { status: "invalid_input" };
+    if (!isSafeCounter(input.expectedRotationCounter)) return { status: "invalid_input" };
 
     const s = this.byId.get(input.sessionId);
     if (!s) return { status: "not_found" };
+
+    // 2. Re-validate the PERSISTED session FIRST — loaded data may be corrupt. A
+    //    corrupt numeric/relational state or unknown status fails closed as
+    //    invalid_input (never rotated, and distinct from `expired`/`not_active`).
+    if (!hasValidSessionInvariants(s)) return { status: "invalid_input" };
+    // 3. A structurally-valid but non-active status is not_active.
     if (s.status !== "active") return { status: "not_active" };
+    // 4. Time must not run backwards relative to the session's last use.
+    if (input.now < s.lastUsedAt) return { status: "invalid_input" };
+    // 5. A session at a legitimate deadline is expired.
     if (isSessionTimeExpired(s, input.now)) return { status: "expired" };
-    // CAS: both the counter and the current hash must match the expected values.
+
+    // 6. CAS: both counter and current hash must match the expected values.
     if (
       s.rotationCounter !== input.expectedRotationCounter ||
       s.refreshTokenHash !== input.expectedCurrentRefreshTokenHash
     ) {
       return { status: "conflict" };
     }
-    // rotationCounter must stay a safe, exact, monotonically increasing integer.
-    if (!Number.isInteger(s.rotationCounter) || s.rotationCounter >= MAX_ROTATION_COUNTER) {
-      return { status: "invalid_input" };
-    }
-    // The new idle deadline must be strictly in the future...
+    // 7. rotationCounter must be safely incrementable.
+    if (s.rotationCounter >= MAX_ROTATION_COUNTER) return { status: "invalid_input" };
+    // 8. The new idle deadline must be strictly in the future...
     if (input.newIdleExpiresAt <= input.now) return { status: "invalid_input" };
     // ...and can NEVER extend the session past its absolute ceiling: clamp down.
     const newIdle = Math.min(input.newIdleExpiresAt, s.absoluteExpiresAt);
+    if (newIdle <= input.now) return { status: "invalid_input" };
 
-    // All checks passed — commit atomically (single-threaded, no await above).
+    // 9. All checks passed — commit atomically (single-threaded, no await above).
     this.consumed.set(s.refreshTokenHash, s.id);
     s.rotationCounter += 1;
     s.refreshTokenHash = input.newRefreshTokenHash;

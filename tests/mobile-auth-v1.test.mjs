@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
 
@@ -26,6 +26,11 @@ function collectTs(dir) {
   return out;
 }
 
+// Random, per-process temp dir. It is repo-LOCAL (under a git-ignored .tmp-*
+// prefix) on purpose: the compiled CommonJS output does `require("zod")`, which
+// only resolves against the repo's node_modules, so an os.tmpdir() location
+// would break module resolution. mkdtemp guarantees a unique name, so concurrent
+// runs never collide and no run can delete another run's directory.
 const outDir = mkdtempSync(join(process.cwd(), ".tmp-mobileauth-"));
 const requireCjs = createRequire(import.meta.url);
 execFileSync(
@@ -47,14 +52,15 @@ execFileSync(
 );
 const M = requireCjs(resolve(outDir, "mobile-auth/v1/index.js"));
 const C = requireCjs(resolve(outDir, "api-contract/v1/index.js"));
-// Best-effort teardown: the compiled files were just require()'d, so on Windows a
-// virus scanner can briefly lock them (EBUSY) — retry, and never let a temp-dir
-// cleanup hiccup fail the suite. The dir is git-ignored either way.
+// Teardown always runs (even if tests fail) and cleans ONLY this run's random
+// dir. The compiled files were just require()'d, so on Windows a virus scanner
+// can briefly lock them (EBUSY) — retry generously. Crucially, a cleanup failure
+// is NOT swallowed: if the dir still exists after retries the hook throws (fixed,
+// value-free message) so a real leak surfaces instead of a silent PASS.
 test.after(() => {
-  try {
-    rmSync(outDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  } catch {
-    /* leave the git-ignored temp dir for OS cleanup */
+  rmSync(outDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
+  if (existsSync(outDir)) {
+    throw new Error("temp compile dir was not removed after retries");
   }
 });
 
@@ -401,9 +407,10 @@ test("P2-001: contract refreshTokenSchema accept/reject matrix (single source)",
 async function seedFor(over = {}) {
   const store = new M.InMemoryDeviceSessionStore();
   const h0 = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  // Valid invariants by default: created < idle <= absolute.
   await store.createSession({
     id: "s1", userId: "u1", tokenFamilyId: "f1", refreshTokenHash: h0,
-    createdAt: 100, idleExpiresAt: 10000, absoluteExpiresAt: 5000, ...over
+    createdAt: 100, idleExpiresAt: 1000, absoluteExpiresAt: 5000, ...over
   });
   return { store, h0 };
 }
@@ -441,13 +448,13 @@ test("P2-002: unsafe time/newIdle inputs -> invalid_input, no mutation", async (
     const s = await store.findById("s1"); // reject path must not mutate
     assert.equal(s.rotationCounter, 0);
     assert.equal(s.refreshTokenHash, h0);
-    assert.equal(s.idleExpiresAt, 10000);
+    assert.equal(s.idleExpiresAt, 1000);
   }
 });
 
 test("P2-002: absolute/idle expiry -> expired; unsafe counter -> invalid_input", async () => {
   const hNew = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
-  let { store, h0 } = await seedFor({ absoluteExpiresAt: 150 });
+  let { store, h0 } = await seedFor({ idleExpiresAt: 150, absoluteExpiresAt: 150 });
   assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 210, now: 200 })).status, "expired");
   ({ store, h0 } = await seedFor({ idleExpiresAt: 150 }));
   assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 210, now: 200 })).status, "expired");
@@ -467,6 +474,111 @@ test("P2-002: double concurrent CAS still yields one rotated, one conflict", asy
   ]);
   assert.deepEqual([r1.status, r2.status].sort(), ["conflict", "rotated"]);
   assert.equal((await store.findById("s1")).rotationCounter, 1);
+});
+
+// ==== RR2-P2-001: fail closed on invalid/corrupt session state ====
+test("RR2-A: createSession rejects invalid input BEFORE any write", async () => {
+  const HASH = "hash_secret_zzz";
+  const cases = [
+    { createdAt: NaN }, { createdAt: Infinity }, { createdAt: -Infinity }, { createdAt: -1 }, { createdAt: 100.5 },
+    { idleExpiresAt: NaN }, { idleExpiresAt: Infinity }, { idleExpiresAt: -Infinity }, { idleExpiresAt: -1 }, { idleExpiresAt: 100.5 },
+    { absoluteExpiresAt: NaN }, { absoluteExpiresAt: Infinity }, { absoluteExpiresAt: -Infinity }, { absoluteExpiresAt: -1 }, { absoluteExpiresAt: 100.5 },
+    { idleExpiresAt: 100 }, { idleExpiresAt: 50 }, // <= createdAt(100)
+    { absoluteExpiresAt: 100 }, // <= createdAt
+    { idleExpiresAt: 6000 }, // idle > absolute(5000)
+    { rotationCounter: NaN }, { rotationCounter: Infinity }, { rotationCounter: -1 }, { rotationCounter: 1.5 }, { rotationCounter: Number.MAX_SAFE_INTEGER }
+  ];
+  for (const over of cases) {
+    const store = new M.InMemoryDeviceSessionStore();
+    let threw = null;
+    try {
+      await store.createSession({ id: "s1", userId: "u1", tokenFamilyId: "f1", refreshTokenHash: HASH, createdAt: 100, idleExpiresAt: 1000, absoluteExpiresAt: 5000, ...over });
+    } catch (e) { threw = e; }
+    assert.ok(threw instanceof M.DeviceSessionInvariantError, JSON.stringify(over));
+    assert.ok(!threw.message.includes(HASH)); // no input echoed
+    assert.equal(await store.findById("s1"), null); // no partial write
+  }
+});
+
+test("RR2-B: corrupt persisted session -> invalid_input with zero mutation", async () => {
+  const corruptions = [
+    (r) => { r.absoluteExpiresAt = NaN; },
+    (r) => { r.absoluteExpiresAt = Infinity; },
+    (r) => { r.idleExpiresAt = NaN; },
+    (r) => { r.idleExpiresAt = Infinity; },
+    (r) => { r.idleExpiresAt = 6000; r.absoluteExpiresAt = 5000; }, // idle > absolute
+    (r) => { r.createdAt = NaN; },
+    (r) => { r.lastUsedAt = NaN; },
+    (r) => { r.createdAt = 500; }, // lastUsedAt(100) < createdAt(500)
+    (r) => { r.rotationCounter = NaN; },
+    (r) => { r.status = "weird"; } // unknown status -> invalid_input (not not_active)
+  ];
+  const hNew = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  for (const corrupt of corruptions) {
+    const { store, h0 } = await seedFor();
+    // Simulate a DB record that later became corrupt. byId is TS-private but a
+    // plain runtime property; mutated ONLY here to inject corruption (no prod backdoor).
+    const rec = store.byId.get("s1");
+    corrupt(rec);
+    const snapshot = { ...rec };
+    const r = await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 800, now: 200 });
+    assert.equal(r.status, "invalid_input");
+    assert.deepStrictEqual({ ...rec }, snapshot); // reject path mutated nothing
+    assert.equal(store.classifyRefreshToken(h0).kind, "current"); // consumed history not grown
+  }
+});
+
+test("RR2-C: Codex PoC — absolute NaN/Infinity + newIdle 999999 never rotates", async () => {
+  const hNew = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  for (const absVal of [NaN, Infinity]) {
+    const { store, h0 } = await seedFor();
+    store.byId.get("s1").absoluteExpiresAt = absVal; // corrupt absolute ceiling
+    const r = await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 999999, now: 200 });
+    assert.notEqual(r.status, "rotated");
+    assert.equal(r.status, "invalid_input");
+    assert.equal((await store.findById("s1")).rotationCounter, 0);
+    assert.notEqual((await store.findById("s1")).idleExpiresAt, 999999);
+  }
+});
+
+test("RR2-D: legal rotation, clamp, exact deadlines, monotonic, reject-then-succeed", async () => {
+  const hNew = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  let { store, h0 } = await seedFor({ idleExpiresAt: 3000, absoluteExpiresAt: 5000 });
+  let r = await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 2500, now: 200 });
+  assert.equal(r.status, "rotated");
+  assert.equal(r.session.rotationCounter, 1); // monotonic
+  assert.equal(r.session.idleExpiresAt, 2500);
+
+  ({ store, h0 } = await seedFor({ idleExpiresAt: 1000, absoluteExpiresAt: 5000 }));
+  r = await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 99999, now: 200 });
+  assert.equal(r.session.idleExpiresAt, 5000); // clamped to absolute
+
+  ({ store, h0 } = await seedFor({ idleExpiresAt: 200, absoluteExpiresAt: 5000 }));
+  assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 400, now: 200 })).status, "expired"); // exact idle
+  ({ store, h0 } = await seedFor({ idleExpiresAt: 200, absoluteExpiresAt: 200 }));
+  assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 400, now: 200 })).status, "expired"); // exact absolute
+
+  // a rejected attempt does not block the next legal rotation
+  ({ store, h0 } = await seedFor({ idleExpiresAt: 3000, absoluteExpiresAt: 5000 }));
+  assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: NaN, now: 200 })).status, "invalid_input");
+  assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 2500, now: 200 })).status, "rotated");
+});
+
+test("RR2-E: time helpers fail closed on invalid input", () => {
+  const s = session();
+  assert.equal(M.isSessionTimeExpired(s, NaN), true);
+  assert.equal(M.isSessionTimeExpired(s, Infinity), true);
+  assert.equal(M.isSessionTimeExpired({ ...s, absoluteExpiresAt: NaN }, 500), true);
+  assert.equal(M.isSessionTimeExpired({ ...s, idleExpiresAt: Infinity }, 500), true);
+  assert.equal(M.isSessionTimeExpired(s, 500), false);
+  assert.equal(M.isSessionTimeExpired(s, 1000), true); // idle boundary
+  assert.equal(M.isSessionUsable(s, NaN), false);
+  assert.equal(M.isSessionUsable({ ...s, idleExpiresAt: 6000, absoluteExpiresAt: 5000 }, 500), false); // idle > absolute
+  assert.equal(M.isSessionUsable(s, 500), true);
+  assert.equal(M.nextIdleExpiry(s, NaN, 100), null);
+  assert.equal(M.nextIdleExpiry(s, 500, Infinity), null);
+  assert.equal(M.nextIdleExpiry({ ...s, absoluteExpiresAt: NaN }, 500, 100), null);
+  assert.equal(M.nextIdleExpiry(s, 500, 100), 600); // valid
 });
 
 // ============ FIX-P2-003A: audit reason controlled enum ============

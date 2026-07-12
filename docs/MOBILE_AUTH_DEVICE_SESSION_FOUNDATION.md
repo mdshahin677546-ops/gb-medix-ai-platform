@@ -49,6 +49,31 @@ real DB transactions / row locks.
 - **Concurrent rotation safety**: at most one concurrent rotation may win; two
   new simultaneously-valid refresh tokens must never exist.
 
+## Fail-closed session state (persisted data may be corrupt)
+
+Type-system `number` is NOT trusted at runtime — a loaded/stored session may be
+corrupt. A single authoritative validator (`hasValidSessionInvariants`) enforces
+the numeric/relational invariants (all of createdAt/lastUsedAt/idle/absolute are
+safe non-negative integers; rotationCounter is a safe non-negative integer;
+createdAt ≤ lastUsedAt; idle > createdAt; absolute > createdAt; idle ≤ absolute)
+and is used at every boundary:
+
+- `createSession` validates ALL inputs before any write; invalid input throws a
+  fixed, value-free `DeviceSessionInvariantError` (no partial session is stored).
+- `rotateRefreshTokenAtomically` re-validates the persisted session and request
+  inputs; a corrupt/invalid state (NaN/Infinity/non-integer/out-of-range time or
+  counter, idle > absolute, unknown status, `now` running backwards) returns
+  `invalid_input` and mutates nothing. A legitimately-reached deadline returns
+  `expired`; the two are never conflated.
+- The time helpers fail closed: `isSessionTimeExpired`/`isSessionUsable` treat
+  invalid input as unusable, and `nextIdleExpiry` returns `null` (never NaN/Infinity)
+  for invalid input. A refreshed idle deadline is always clamped to the absolute
+  ceiling, which a refresh can never extend.
+
+The optional `rotationCounter` on `createSession` models rehydrating a stored
+session. In production it may ONLY come from a trusted database record, it is
+re-validated here regardless, and a corrupt / non-finite value fails closed.
+
 ## Store production requirement (gate)
 
 `rotateRefreshTokenAtomically` MUST be a genuine atomic operation in production:
