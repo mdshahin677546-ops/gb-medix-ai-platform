@@ -14,6 +14,14 @@ const DEVICE_SESSION_STATUS_SET: ReadonlySet<string> = new Set(DEVICE_SESSION_ST
 /** rotationCounter must stay below this so the NEXT increment is still an exact integer. */
 export const MAX_ROTATION_COUNTER = Number.MAX_SAFE_INTEGER - 1;
 
+/**
+ * DB-backed stores use a Postgres `Int` (int4, max 2^31-1) for rotationCounter, so
+ * the counter is capped BELOW that: a store rejects rotation once the counter
+ * reaches this value so the next increment (+1) still fits int4. This keeps the DB
+ * column capacity and the JS constant explicitly in sync (no silent drift).
+ */
+export const DB_MAX_ROTATION_COUNTER = 2147483646;
+
 export const REVOKE_REASONS = [
   "user_logout",
   "user_logout_all",

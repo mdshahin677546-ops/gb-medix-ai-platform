@@ -13,5 +13,6 @@ export * from "./device-session";
 export * from "./eligibility";
 export * from "./rotation";
 export * from "./store";
+export * from "./prisma-store";
 export * from "./device-metadata";
 export * from "./audit";
