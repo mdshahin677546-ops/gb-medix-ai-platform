@@ -15,5 +15,6 @@ export * from "./report";
 export * from "./entitlement";
 export * from "./product";
 export * from "./client";
+export * from "./mobile-auth";
 
 export const API_CONTRACT_VERSION = "v1" as const;
