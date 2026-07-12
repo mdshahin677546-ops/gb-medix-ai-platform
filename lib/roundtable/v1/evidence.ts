@@ -7,7 +7,7 @@
 // through this schema, and URL/DOI checks here are structural only.
 
 import { z } from "zod";
-import { CONTROL_CHARS_RE, isValidCalendarDate, isValidIsoDateTime } from "./types";
+import { CONTROL_CHARS_RE, ID_UNSAFE_CHARS_RE, isValidCalendarDate, isValidIsoDateTime } from "./types";
 
 export const EVIDENCE_SOURCE_TYPES = [
   "guideline",
@@ -25,25 +25,38 @@ export const EVIDENCE_VERIFICATION_STATUSES = ["pending", "verified", "rejected"
 
 export const EVIDENCE_LEVELS = ["high", "moderate", "low", "very_low"] as const;
 
-/** Non-blank after trim, bounded, no control characters. */
+/**
+ * Shared id policy for EvidenceSource ids AND claim reference ids (single
+ * source of truth — claims.ts imports this schema). Checked on the RAW
+ * string BEFORE any trim: no whitespace of any kind (ASCII space, NBSP
+ * U+00A0, ideographic space U+3000), no zero-width/invisible characters
+ * (U+200B..U+200F, U+2060, U+FEFF, soft hyphen), no control characters —
+ * as prefix, suffix or anywhere inside the id.
+ */
 export const EvidenceIdSchema = z
   .string()
+  .min(1)
   .max(200)
-  .refine((s) => s.trim().length > 0, "evidence id must be non-blank after trim")
-  .refine((s) => !CONTROL_CHARS_RE.test(s), "evidence id must not contain control characters");
+  .refine((raw) => !ID_UNSAFE_CHARS_RE.test(raw), "id must not contain whitespace or invisible characters")
+  .refine((raw) => !CONTROL_CHARS_RE.test(raw), "id must not contain control characters");
 
 const DOI_RE = /^doi:10\.\d{4,9}\/\S+$/i;
 
 /**
  * Structural check only: an http(s) URL or a `doi:10.xxxx/...` identifier.
- * Passing this check does NOT mean the source exists or is verified.
+ * URLs must carry NO credentials — username and password (plain or
+ * percent-encoded) are rejected, and a hostname must be present. Passing
+ * this check does NOT mean the source exists or is verified.
  */
 export function isStructurallyValidUrlOrDoi(value: string): boolean {
   if (DOI_RE.test(value)) return true;
   if (!/^https?:\/\//i.test(value)) return false;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:";
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    if (url.username !== "" || url.password !== "") return false;
+    if (url.hostname.length === 0) return false;
+    return true;
   } catch {
     return false;
   }

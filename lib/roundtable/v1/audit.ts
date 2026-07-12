@@ -106,6 +106,9 @@ const FORBIDDEN_VALUE_PATTERNS: RegExp[] = [
   /\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{4,}\./, // JWT shape
   /sk-[A-Za-z0-9]/,
   /(api[_-]?key|secret|passwd|password|cookie|authorization)/i,
+  /(access|refresh|session|auth)[_-]?token/i, // accessToken / refresh_token / … (case folded)
+  /token\s*[=:]/i, // token assignment in any form
+  /%(25)*(40|3d)/i, // percent-encoded @ / = markers at any nesting depth
   /[?&](token|key|secret|password|auth|session|sig)=/i, // sensitive URL query params
   /postgres(ql)?:\/\//i,
   /(mrn|medical\s*record|病历号|病案号|病历编号)/i,
@@ -121,17 +124,40 @@ const CJK_RUN_RE = /[一-鿿]{12,}/;
 
 const JSON_LIKE_RE = /^\s*[[{]|["'][a-zA-Z0-9_]+["']\s*:/;
 
-function assertSafeMetadataString(key: string, value: string): string {
-  if (ZERO_WIDTH_RE.test(value)) {
+/**
+ * Percent-decoding variants for scanning: the raw value plus (bounded) one
+ * and two decode layers, so `user%40example.com` and `user%2540example.com`
+ * are seen as emails. Invalid percent-encoding fails CLOSED — a value that
+ * cannot be decoded is rejected outright, never passed through unscanned.
+ */
+function collectScanVariants(key: string, value: string): string[] {
+  const variants = [value];
+  if (value.includes("%")) {
+    let first: string;
+    try {
+      first = decodeURIComponent(value);
+    } catch {
+      throw new Error(`Audit metadata value for ${key} contains invalid percent-encoding`);
+    }
+    if (first !== value) variants.push(first);
+    if (first.includes("%")) {
+      let second: string;
+      try {
+        second = decodeURIComponent(first);
+      } catch {
+        throw new Error(`Audit metadata value for ${key} contains invalid nested percent-encoding`);
+      }
+      if (second !== first) variants.push(second);
+    }
+  }
+  return variants;
+}
+
+function checkStringVariant(key: string, variant: string): void {
+  if (ZERO_WIDTH_RE.test(variant)) {
     throw new Error(`Audit metadata value for ${key} contains zero-width characters`);
   }
-  const normalized = value.normalize("NFKC").trim();
-  if (normalized.length === 0) {
-    throw new Error(`Audit metadata value for ${key} is empty after trim`);
-  }
-  if (normalized.length > AUDIT_METADATA_VALUE_MAX_LENGTH) {
-    throw new Error(`Audit metadata value for ${key} exceeds ${AUDIT_METADATA_VALUE_MAX_LENGTH} characters`);
-  }
+  const normalized = variant.normalize("NFKC").trim();
   if (CONTROL_CHARS_RE.test(normalized)) {
     throw new Error(`Audit metadata value for ${key} contains control characters`);
   }
@@ -154,6 +180,21 @@ function assertSafeMetadataString(key: string, value: string): string {
   // are caught by the grouped pattern above.
   if (!DIGIT_RUN_EXEMPT_KEYS.has(key) && /\d{8,}/.test(normalized)) {
     throw new Error(`Audit metadata value for ${key} contains a long digit run (possible phone/MRN/id)`);
+  }
+}
+
+function assertSafeMetadataString(key: string, value: string): string {
+  const normalized = value.normalize("NFKC").trim();
+  if (normalized.length === 0) {
+    throw new Error(`Audit metadata value for ${key} is empty after trim`);
+  }
+  if (normalized.length > AUDIT_METADATA_VALUE_MAX_LENGTH) {
+    throw new Error(`Audit metadata value for ${key} exceeds ${AUDIT_METADATA_VALUE_MAX_LENGTH} characters`);
+  }
+  // Every check runs on the raw value AND its percent-decoded variants —
+  // encoding is never a way around the scan.
+  for (const variant of collectScanVariants(key, value)) {
+    checkStringVariant(key, variant);
   }
   return normalized;
 }

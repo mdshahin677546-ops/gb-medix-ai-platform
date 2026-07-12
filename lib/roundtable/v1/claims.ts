@@ -13,8 +13,8 @@
 // exist, or expired evidence without an explicit limitation note.
 
 import { z } from "zod";
-import { EvidenceSource } from "./evidence";
-import { CONTROL_CHARS_RE } from "./types";
+import { EvidenceIdSchema, EvidenceSource } from "./evidence";
+import { CONTROL_CHARS_RE, ID_UNSAFE_CHARS_RE } from "./types";
 
 export const CLAIM_TYPES = [
   "confirmed_fact",
@@ -30,18 +30,13 @@ export const CRITICAL_CLAIM_TYPES = ["confirmed_fact", "current_consensus", "saf
 
 export const CLAIM_VERIFICATION_STATUSES = ["pending", "verified", "rejected"] as const;
 
-const ReferenceIdSchema = z
-  .string()
-  .max(200)
-  .refine((s) => s.trim().length > 0, "referenced evidence id must be non-blank after trim")
-  .refine((s) => !CONTROL_CHARS_RE.test(s), "referenced evidence id must not contain control characters");
+// SAME schema as EvidenceSource ids — one shared policy, no place where an
+// id is normalized on one side but not the other (RR-P2-001).
+const ReferenceIdSchema = EvidenceIdSchema;
 
 export const EvidenceClaimSchema = z
   .object({
-    id: z
-      .string()
-      .max(200)
-      .refine((s) => s.trim().length > 0, "claim id must be non-blank after trim"),
+    id: ReferenceIdSchema,
     statement: z.string().min(1),
     claimType: z.enum(CLAIM_TYPES),
     supportingEvidenceIds: z.array(ReferenceIdSchema),
@@ -77,6 +72,22 @@ export function validateClaimsForMedicalReview(
   // Fail closed: no claims means nothing to review — never "ready".
   if (claims.length === 0) {
     return { ready: false, violations: [{ claimId: "(claims)", reason: "no_claims_provided" }] };
+  }
+
+  // Source ids follow the SAME raw policy as claim reference ids: no
+  // whitespace or invisible characters anywhere, no control characters.
+  for (const source of sources) {
+    if (
+      typeof source.id !== "string" ||
+      source.id.length === 0 ||
+      ID_UNSAFE_CHARS_RE.test(source.id) ||
+      CONTROL_CHARS_RE.test(source.id)
+    ) {
+      violations.push({ claimId: "(evidence)", reason: "invalid_evidence_id" });
+    }
+  }
+  if (violations.length > 0) {
+    return { ready: false, violations };
   }
 
   // Duplicate evidence ids are ambiguous and rejected before any Map is

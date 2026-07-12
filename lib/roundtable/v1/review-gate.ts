@@ -25,15 +25,18 @@ export const REVIEWER_ID_MAX_LENGTH = 128;
 
 /**
  * Opaque external reviewer id: must be a string, non-blank after trim,
- * bounded, and free of control characters. It is NOT an auth credential and
- * NOT proof of doctor identity/qualification.
+ * bounded, and free of control characters. The control-character check runs
+ * on the RAW string BEFORE any trim/transform, so "reviewer\n" (or tab/CR,
+ * leading or trailing, C0/DEL/C1) can never slip through by being trimmed
+ * away. Plain ASCII spaces around an id remain allowed and are trimmed. It
+ * is NOT an auth credential and NOT proof of doctor identity/qualification.
  */
 export const ReviewerIdSchema = z
   .string()
   .max(REVIEWER_ID_MAX_LENGTH, `reviewer id must be at most ${REVIEWER_ID_MAX_LENGTH} characters`)
+  .refine((raw) => !CONTROL_CHARS_RE.test(raw), "reviewer id must not contain control characters")
   .transform((s) => s.trim())
-  .refine((s) => s.length > 0, "reviewer id must be non-blank after trim")
-  .refine((s) => !CONTROL_CHARS_RE.test(s), "reviewer id must not contain control characters");
+  .refine((s) => s.length > 0, "reviewer id must be non-blank after trim");
 
 export const MEDICAL_REVIEW_DECISIONS = [
   "approved",

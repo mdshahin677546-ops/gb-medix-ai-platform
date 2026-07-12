@@ -201,10 +201,12 @@ test("P1-002: duplicate evidence ids are rejected in every order — verified ca
   }
 });
 
-test("P1-002: whitespace-variant and case-variant ids are ambiguous duplicates", () => {
+test("P1-002: whitespace-variant ids are invalid outright; case-variant ids are ambiguous duplicates", () => {
+  // RR-P2-001 tightened the policy: ids with any whitespace are rejected as
+  // invalid before dedupe even runs (fail closed).
   const r1 = rt.validateClaimsForMedicalReview([makeClaim()], [makeEvidence(), makeEvidence({ id: " e1 " })]);
   assert.equal(r1.ready, false);
-  assert.ok(r1.violations.some((v) => v.reason.startsWith("duplicate_evidence_id")));
+  assert.ok(r1.violations.some((v) => v.reason === "invalid_evidence_id"));
   const r2 = rt.validateClaimsForMedicalReview([makeClaim()], [makeEvidence({ id: "E1" }), makeEvidence({ id: "e1" })]);
   assert.equal(r2.ready, false);
   assert.ok(r2.violations.some((v) => v.reason.startsWith("duplicate_evidence_id")));
@@ -790,4 +792,183 @@ test("evidence: URL/DOI existing is not verification; withdrawn/unverified unusa
   assert.deepEqual(claim.opposingEvidenceIds, ["e2"]);
   const expired = rt.validateClaimsForMedicalReview([makeClaim({ limitations: [] })], [makeEvidence({ expired: true })]);
   assert.ok(expired.violations.some((v) => v.reason.startsWith("expired_evidence_without_limitation")));
+});
+
+// ================= Second review (RR) findings =================
+const C = (n) => String.fromCharCode(n); // build control/invisible chars without literal bytes
+
+test("RR-P1-001: personal diagnosis synonyms are high-risk blocked (zh/en), riskLevel=low cannot override", () => {
+  const titles = [
+    "我可能罹患糖尿病吗", "我是否罹患糖尿病", "我是不是罹患糖尿病", "我疑似患有糖尿病",
+    "我可能患有糖尿病", "我是否患有糖尿病", "我会不会得了糖尿病", "我是不是得了糖尿病",
+    "我可能得了什么病", "根据这些症状我患了什么病",
+    "might I have diabetes", "could I have diabetes", "do I have diabetes",
+    "am I likely to have diabetes", "could these symptoms mean I have diabetes",
+    "determine whether I have diabetes",
+  ];
+  for (const title of titles) {
+    const r = safety(title, { riskLevel: "low" });
+    assert.equal(r.allowed, false, title);
+    assert.equal(r.blockReason, "high_risk", title);
+  }
+  // the exact Codex attack through the real planDailyRun entry point
+  const run = rt.planDailyRun(
+    makeInput({ candidateTopics: [makeTopic({ title: "我可能罹患糖尿病吗", normalizedQuestion: "我可能罹患糖尿病吗" })] }),
+    new rt.InMemoryRunClaimStore()
+  );
+  assert.equal(run.status, "blocked");
+  assert.equal(run.blockedState, "high_risk_blocked");
+});
+
+test("RR-P1-001: separators, zero-width and academic/educational wrappers do not bypass", () => {
+  const ZWS = C(0x200b);
+  const evasions = [
+    "我 可能 罹患 糖尿病 吗",
+    "我，可能。罹患，糖尿病",
+    "我/可能/罹患/糖尿病",
+    "我_可能_罹患_糖尿病",
+    "我-可能-罹患-糖尿病",
+    "我\n可能\n罹患\n糖尿病",
+    "我" + ZWS + "可能" + ZWS + "罹患" + ZWS + "糖尿病",
+    "仅供学术讨论：我可能罹患糖尿病吗",
+    "for educational purposes only: do I have diabetes",
+    "hypothetical case: could I have diabetes",
+  ];
+  for (const title of evasions) {
+    assert.equal(safety(title).blockReason, "high_risk", JSON.stringify(title));
+  }
+});
+
+test("RR-P1-001: population-level diabetes education topics still plan normally", () => {
+  const good = [
+    "糖尿病的常见风险因素有哪些", "如何理解糖尿病诊断标准", "糖尿病筛查指南的证据质量",
+    "What are the population risk factors for diabetes?", "How do clinical guidelines define diabetes?",
+  ];
+  for (const title of good) {
+    const r = rt.planDailyRun(
+      makeInput({ candidateTopics: [makeTopic({ title, normalizedQuestion: title, category: "public_health" })] }),
+      new rt.InMemoryRunClaimStore()
+    );
+    assert.equal(r.status, "planned", title);
+  }
+});
+
+test("RR-P1-002: control characters around reviewer ids are rejected on the RAW string, pre-trim", () => {
+  const bad = [
+    "reviewer\n", "reviewer\t", "reviewer\r", "\nreviewer", "\treviewer", "\rreviewer",
+    "rev" + C(0x00) + "iewer", "rev" + C(0x1f) + "iewer", "rev" + C(0x7f) + "iewer", "rev" + C(0x85) + "iewer",
+    C(0x00), "\n\t\r",
+  ];
+  for (const id of bad) {
+    assert.equal(rt.evaluatePublicationGate(makeGate({ approvedByReviewerId: id })).canPublish, false, JSON.stringify(id));
+    assert.throws(
+      () => rt.createPublicationPlan(makePlanInput({ gate: makeGate({ approvedByReviewerId: id }) })),
+      /Publication gate failed/, JSON.stringify(id)
+    );
+  }
+  // plain ASCII spaces around a legit id keep the established trim behavior
+  const plan = rt.createPublicationPlan(makePlanInput({ gate: makeGate({ approvedByReviewerId: "  reviewer-1  " }) }));
+  assert.equal(plan.approvedByReviewerId, "reviewer-1");
+});
+
+test("RR-P1-003: URL-encoded PII and compact token names are rejected", () => {
+  const bad = [
+    "user%40example.com", "user%2540example.com", "token%3Dabc", "token%253Dabc",
+    "user%40例子.com",
+    "accessTokenABCDEF123456", "refreshTokenABCDEF123456", "apiKeyABCDEF123456",
+    "ACCESS_TOKEN_ABC", "auth-token-abc",
+    "ｕｓｅｒ%40example.com", // full-width letters + encoded @
+    "access" + C(0x200b) + "TokenABC", // zero-width split
+  ];
+  for (const value of bad) {
+    assert.throws(() => auditWith(value), /Audit metadata value/, value);
+  }
+});
+
+test("RR-P1-003: invalid percent-encoding fails closed; normal short reasons still pass", () => {
+  assert.throws(() => auditWith("50%"), /invalid percent-encoding/);
+  assert.throws(() => auditWith("%zz-broken"), /invalid percent-encoding/);
+  for (const ok of ["daily_slot_claimed", "high_risk", "fingerprint_mismatch", "no_viable_topic", "retryable_error"]) {
+    const event = rt.createAuditEvent({ ...auditBase, safeMetadata: { reason: ok } });
+    assert.equal(event.safeMetadata.reason, ok);
+  }
+});
+
+test("RR-P2-001: whitespace/invisible characters in ids are rejected raw — prefix, inside and suffix", () => {
+  const chars = [C(0xa0), C(0x3000), C(0x200b), C(0x200c), C(0x200d), C(0x2060), C(0xfeff), " "];
+  for (const ch of chars) {
+    for (const id of [ch + "e1", "e" + ch + "1", "e1" + ch]) {
+      assert.equal(rt.EvidenceSourceSchema.safeParse(makeEvidence({ id })).success, false, JSON.stringify(id));
+      assert.equal(rt.EvidenceClaimSchema.safeParse(makeClaim({ supportingEvidenceIds: [id] })).success, false, JSON.stringify(id));
+      assert.equal(rt.EvidenceClaimSchema.safeParse(makeClaim({ id })).success, false, JSON.stringify(id));
+    }
+  }
+  // same policy guards the validator path directly
+  const r = rt.validateClaimsForMedicalReview([makeClaim()], [makeEvidence({ id: "e" + C(0x200b) + "1" })]);
+  assert.equal(r.ready, false);
+  assert.ok(r.violations.some((v) => v.reason === "invalid_evidence_id"));
+  // legitimate ids and reference binding still work
+  assert.equal(rt.validateClaimsForMedicalReview([makeClaim()], [makeEvidence()]).ready, true);
+});
+
+test("RR-P2-002: JSON round-trip tampering of source claim metadata is detected against the trusted ref", () => {
+  const source = makeSourceRef();
+  const [asset] = rt.createDraftDistributionAssets(source, [makeAssetContent("zh")]);
+  const roundTrip = () => JSON.parse(JSON.stringify(asset));
+  const tampers = [
+    ["sourceConsensusId", { sourceConsensusId: "roundtable:2026-07-11:ffffffffffffffff:v1" }],
+    ["sourceVersion", { sourceVersion: 2 }],
+    ["sourceClaimIds add", { sourceClaimIds: ["c1", "c2", "sw1", "cX"] }],
+    ["sourceClaimIds delete", { sourceClaimIds: ["c1", "c2"] }],
+    ["sourceClaimIds replace", { sourceClaimIds: ["c1", "cZ", "sw1"] }],
+    ["sourceClaimIds duplicate", { sourceClaimIds: ["c1", "c1", "c2", "sw1"] }],
+    ["sourceClaimIds case variant", { sourceClaimIds: ["C1", "c2", "sw1"] }],
+    ["safety warning delete", { sourceSafetyWarningClaimIds: [] }],
+  ];
+  for (const [label, patch] of tampers) {
+    const tampered = { ...roundTrip(), ...patch };
+    assert.ok(rt.validateAssetClaimIntegrity(tampered, source).length > 0, label);
+    assert.equal(rt.evaluateAssetPublishability(tampered, source).canPublish, false, label);
+  }
+  // the exact Codex attack: sourceClaimIds changed, translatedClaimIds untouched
+  const codexAttack = { ...roundTrip(), sourceClaimIds: ["c1", "c2", "sw1", "injected"] };
+  assert.ok(rt.validateAssetClaimIntegrity(codexAttack, source).length > 0);
+  // consistent tampering of BOTH declared and translated sets is still caught
+  const consistent = { ...roundTrip(), sourceClaimIds: ["cX"], translatedClaimIds: ["cX"] };
+  assert.ok(rt.validateAssetClaimIntegrity(consistent, source).length > 0);
+  // whitespace-variant ids are schema-invalid, hence violations too
+  const spaced = { ...roundTrip(), sourceClaimIds: ["c1 ", "c2", "sw1"] };
+  assert.ok(rt.validateAssetClaimIntegrity(spaced, source).length > 0);
+  // an untampered round-tripped asset still passes
+  assert.equal(rt.validateAssetClaimIntegrity(roundTrip(), source).length, 0);
+});
+
+test("RR-P2-003: supported date range is 0001-01-01..9999-12-31 across all date inputs", () => {
+  assert.equal(rt.isValidCalendarDate("0000-01-01"), false);
+  assert.equal(rt.isValidCalendarDate("0001-01-01"), true);
+  assert.equal(rt.isValidCalendarDate("9999-12-31"), true);
+  assert.equal(rt.isValidCalendarDate("10000-01-01"), false);
+  assert.equal(rt.isValidCalendarDate("1900-02-29"), false);
+  assert.equal(rt.isValidCalendarDate("2000-02-29"), true);
+  assert.equal(rt.isValidCalendarDate("2026-02-29"), false);
+  assert.equal(rt.isValidCalendarDate("2028-02-29"), true);
+  assert.throws(() => rt.planDailyRun(makeInput({ runDate: "0000-01-01" }), new rt.InMemoryRunClaimStore()));
+  assert.equal(rt.EvidenceSourceSchema.safeParse(makeEvidence({ publicationDate: "0000-01-01" })).success, false);
+  assert.equal(rt.EvidenceSourceSchema.safeParse(makeEvidence({ retrievedAt: "0000-01-01T00:00:00.000Z" })).success, false);
+});
+
+test("RR-P2-004: URLs with credentials are rejected; clean http(s) URLs valid but never auto-verified", () => {
+  const bad = [
+    "https://user:pass@example.org/path", "https://user@example.org/", "https://:pass@example.org/",
+    "https://user%40evil:p%40ss@example.org/", "javascript:alert(1)", "file:///etc/passwd",
+    "ftp://example.org/x", "https://",
+  ];
+  for (const u of bad) {
+    assert.equal(rt.EvidenceSourceSchema.safeParse(makeEvidence({ urlOrIdentifier: u })).success, false, u);
+  }
+  for (const u of ["https://example.org/guideline", "http://example.org/x", "https://doi.org/10.1234/abc"]) {
+    assert.equal(rt.EvidenceSourceSchema.safeParse(makeEvidence({ urlOrIdentifier: u })).success, true, u);
+  }
+  const unverified = makeEvidence({ urlOrIdentifier: "https://example.org/x", verificationStatus: "pending" });
+  assert.equal(rt.evaluateEvidenceUsability(unverified).usable, false);
 });

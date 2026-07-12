@@ -17,15 +17,21 @@ import { MedicalReviewDecisionSchema } from "./review-gate";
 import {
   CONTENT_LIFECYCLE_STATUSES,
   ContentLifecycleStatus,
+  CONTROL_CHARS_RE,
+  ID_UNSAFE_CHARS_RE,
   MEDICAL_REVIEW_STATUSES,
 } from "./types";
 
 export const SUPPORTED_LANGUAGES = ["zh", "en"] as const;
 
+// Same raw id policy as evidence/claim ids: no whitespace, invisible or
+// control characters anywhere.
 const ClaimIdSchema = z
   .string()
+  .min(1)
   .max(200)
-  .refine((s) => s.trim().length > 0, "claim id must be non-blank after trim");
+  .refine((raw) => !ID_UNSAFE_CHARS_RE.test(raw), "claim id must not contain whitespace or invisible characters")
+  .refine((raw) => !CONTROL_CHARS_RE.test(raw), "claim id must not contain control characters");
 
 export const DraftDistributionAssetSchema = z
   .object({
@@ -203,10 +209,17 @@ export function createDraftDistributionAssets(
 }
 
 /**
- * Structural integrity of an asset against its source: identity, version,
- * claim-set equality, safety-warning preservation, no duplicates. Detects
- * any tampering with the immutable medical structure. Structural only — it
- * cannot and does not verify semantic translation equivalence.
+ * Structural integrity of an asset against the TRUSTED source ref. Every
+ * source-metadata field the asset carries (sourceConsensusId, sourceVersion,
+ * sourceClaimIds, sourceSafetyWarningClaimIds) is re-compared against the
+ * trusted ref — an asset that survived a JSON round-trip with tampered
+ * source metadata is still caught, even when translatedClaimIds was left
+ * untouched or was tampered consistently with sourceClaimIds. Detects
+ * additions, deletions, replacements, duplicates, blank/whitespace ids and
+ * case variants (comparison is exact after trim). Object.freeze on created
+ * assets is only an extra safety layer — THIS comparison is the trust
+ * boundary. Structural only — it cannot and does not verify semantic
+ * translation equivalence.
  */
 export function validateAssetClaimIntegrity(
   asset: DraftDistributionAsset,
@@ -223,22 +236,47 @@ export function validateAssetClaimIntegrity(
   if (asset.sourceVersion !== source.version) {
     violations.push(`asset sourceVersion ${asset.sourceVersion} does not match consensus version ${source.version}`);
   }
-  let sourceClaimIds: string[];
-  let sourceSafetyIds: string[];
+  let refClaimIds: string[];
+  let refSafetyIds: string[];
   try {
-    sourceClaimIds = normalizeClaimIdSet(source.claimIds, "source claim ids");
-    sourceSafetyIds = normalizeClaimIdSet(source.safetyWarningClaimIds, "source safety-warning claim ids");
+    refClaimIds = normalizeClaimIdSet(source.claimIds, "source claim ids");
+    refSafetyIds = normalizeClaimIdSet(source.safetyWarningClaimIds, "source safety-warning claim ids");
   } catch (error) {
     violations.push(error instanceof Error ? error.message : "invalid source claim sets");
     return violations;
   }
-  const translatedUnique = new Set(asset.translatedClaimIds.map((id) => id.trim()));
-  if (translatedUnique.size !== asset.translatedClaimIds.length) {
-    violations.push("translated claim ids contain duplicates");
+
+  const checkSetAgainstRef = (label: string, declared: readonly string[], expected: readonly string[]) => {
+    const trimmed = declared.map((id) => id.trim());
+    if (trimmed.some((id) => id.length === 0)) {
+      violations.push(`${label}_contains_blank_id`);
+    }
+    const unique = new Set(trimmed);
+    if (unique.size !== trimmed.length) {
+      violations.push(`${label}_contains_duplicates`);
+    }
+    for (const id of unique) {
+      if (!expected.includes(id)) violations.push(`${label}_added:${id}`);
+    }
+    for (const id of expected) {
+      if (!unique.has(id)) violations.push(`${label}_missing:${id}`);
+    }
+  };
+
+  checkSetAgainstRef("source_claim_ids", asset.sourceClaimIds, refClaimIds);
+  checkSetAgainstRef("source_safety_warning_claim_ids", asset.sourceSafetyWarningClaimIds, refSafetyIds);
+  checkSetAgainstRef("translated_claim_ids", asset.translatedClaimIds, refClaimIds);
+
+  // translatedClaimIds must ALSO agree with the asset's own declared
+  // sourceClaimIds — a consistent tamper of both is still a mismatch above,
+  // and an inconsistent pair is caught here.
+  const declaredSet = [...new Set(asset.sourceClaimIds.map((id) => id.trim()))].sort();
+  const translatedSet = [...new Set(asset.translatedClaimIds.map((id) => id.trim()))].sort();
+  if (JSON.stringify(declaredSet) !== JSON.stringify(translatedSet)) {
+    violations.push("translated_claim_ids_do_not_match_declared_source_claim_ids");
   }
-  violations.push(...compareClaimSets(sourceClaimIds, [...translatedUnique]));
-  for (const id of sourceSafetyIds) {
-    if (!translatedUnique.has(id)) {
+  for (const id of refSafetyIds) {
+    if (!translatedSet.includes(id)) {
       violations.push(`safety_warning_claim_missing:${id}`);
     }
   }

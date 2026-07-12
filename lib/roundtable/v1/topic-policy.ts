@@ -105,6 +105,17 @@ const PRIVACY_COMPACT_PATTERNS: RegExp[] = [
 // treatment, child/pregnancy dosing, suicide/self-harm, and
 // academically-wrapped individual directives.
 const HIGH_RISK_COMPACT_PATTERNS: RegExp[] = [
+  // Generalized personal-subject + illness-uncertainty / diagnosis-judgment
+  // request (RR-P1-001): 我/本人 followed within a short window by any
+  // "suffer from / have contracted" verb — covers 罹患/患有/疑似患/可能得了
+  // and similar synonyms, not just fixed sentences. (?!们) keeps plural
+  // 我们 (population-level phrasing) out of the individual rule.
+  /(我(?!们)|本人).{0,6}(罹患|患有|患上|患了|得了|得上|得的是|染上)/,
+  /(患|得)了?(什么|啥)(病|症)/,
+  /(might|could|do|can|will|would|does)i(likely|possibly|actually|really)?(to)?have/,
+  /ami(likely|possibly|atrisk)?(to)?have/,
+  /(symptom|sign)s?(these)?(mean|suggest|indicate)(that)?i(might|could|may)?(have|had)/,
+  /determine(whether|if)i(have|had|am)/,
   /我(是不是|得了|患了|有没有|到底是不是)/,
   /(帮我|给我|替我).{0,4}(确诊|诊断|看病|开药|处方)/,
   /diagnos(e|is|ing).{0,8}(me|my|him|her|thispatient|thepatient)/,

@@ -33,8 +33,15 @@ export const CONTENT_LIFECYCLE_STATUSES = ["active", "withdrawn", "superseded"] 
 
 export type ContentLifecycleStatus = (typeof CONTENT_LIFECYCLE_STATUSES)[number];
 
-/** C0 control characters and DEL. */
-export const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
+/** C0 control characters, DEL and C1 control characters. */
+export const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * Characters never allowed inside identifiers: ALL whitespace (\s already
+ * covers NBSP, ideographic space U+3000 and U+FEFF) plus zero-width /
+ * invisible characters. Checked on the RAW string, before any trim.
+ */
+export const ID_UNSAFE_CHARS_RE = /[\s\u200b-\u200f\u2060\ufeff\u00ad]/;
 
 /** Zero-width and invisible characters used for text-matching evasion. */
 export const ZERO_WIDTH_RE = /[\u200b-\u200f\u2060\ufeff\u00ad]/;
@@ -108,7 +115,8 @@ export function normalizeForMatching(text: string): MatchableText {
 }
 
 /**
- * True only for a real proleptic-Gregorian calendar date in YYYY-MM-DD form.
+ * True only for a real proleptic-Gregorian calendar date in YYYY-MM-DD form,
+ * within the supported range 0001-01-01 .. 9999-12-31 (year 0000 rejected).
  * Pure arithmetic — no Date object, no local-timezone conversion.
  */
 export function isValidCalendarDate(value: string): boolean {
@@ -117,6 +125,7 @@ export function isValidCalendarDate(value: string): boolean {
   const year = Number(m[1]);
   const month = Number(m[2]);
   const day = Number(m[3]);
+  if (year < 1) return false;
   if (month < 1 || month > 12 || day < 1) return false;
   const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
   const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
