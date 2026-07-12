@@ -47,7 +47,16 @@ execFileSync(
 );
 const M = requireCjs(resolve(outDir, "mobile-auth/v1/index.js"));
 const C = requireCjs(resolve(outDir, "api-contract/v1/index.js"));
-test.after(() => rmSync(outDir, { recursive: true, force: true }));
+// Best-effort teardown: the compiled files were just require()'d, so on Windows a
+// virus scanner can briefly lock them (EBUSY) — retry, and never let a temp-dir
+// cleanup hiccup fail the suite. The dir is git-ignored either way.
+test.after(() => {
+  try {
+    rmSync(outDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    /* leave the git-ignored temp dir for OS cleanup */
+  }
+});
 
 // A >= 32-char pepper. Never printed.
 const PEPPER = "pepper_0123456789abcdef0123456789abcdef";
@@ -117,7 +126,8 @@ function claims(over = {}) {
 
 test("access claims: valid set passes; typ/iss/aud enforced", () => {
   assert.equal(M.verifyAccessTokenClaims(claims(), POLICY, 1100).ok, true);
-  assert.equal(M.verifyAccessTokenClaims(claims({ typ: "other" }), POLICY, 1100).ok, false); // wrong typ
+  // P3: a wrong typ is rejected by the strict literal schema as malformed_claims
+  assert.equal(M.verifyAccessTokenClaims(claims({ typ: "other" }), POLICY, 1100).reason, "malformed_claims");
   assert.equal(M.verifyAccessTokenClaims(claims({ iss: "evil" }), POLICY, 1100).reason, "wrong_issuer");
   assert.equal(M.verifyAccessTokenClaims(claims({ aud: "web" }), POLICY, 1100).reason, "wrong_audience");
 });
@@ -305,7 +315,7 @@ test("device metadata: allowlist only; forbidden keys rejected", () => {
 
 // ============================ audit events ============================
 test("audit: valid event builds; forbidden/unknown fields throw", () => {
-  const e = M.buildMobileAuthAuditEvent({ event: "mobile_refresh_rotated", occurredAt: 100, userId: "u1", deviceSessionId: "s1", tokenFamilyId: "f1", reason: "ok" });
+  const e = M.buildMobileAuthAuditEvent({ event: "mobile_refresh_rotated", occurredAt: 100, userId: "u1", deviceSessionId: "s1", tokenFamilyId: "f1", reason: "rotated" });
   assert.equal(e.event, "mobile_refresh_rotated");
   for (const forbidden of ["accessToken", "refreshToken", "refreshTokenHash", "authorization", "cookie", "pepper", "email", "phone", "healthData", "paymentInfo"]) {
     assert.throws(
@@ -331,4 +341,156 @@ test("contract: request/result schemas are strict", () => {
   assert.equal(C.mobileLogoutAllRequestSchema.safeParse({ userId: "u1" }).success, false); // no client userId
   assert.equal(C.accessTokenClaimsSchema.safeParse(claims()).success, true);
   assert.equal(C.accessTokenClaimsSchema.safeParse(claims({ email: "a@b.com" })).success, false);
+});
+
+// ==================== FIX-P1-001: policy / now numeric gate ====================
+test("P1: invalid policy or now fails closed (never ok)", () => {
+  const c = claims();
+  const bad = (over, now = 1100) => M.verifyAccessTokenClaims(c, { ...POLICY, ...over }, now);
+  for (const mt of [NaN, Infinity, -Infinity, 0, -5, 1.5]) {
+    assert.equal(bad({ maxTtlSeconds: mt }).reason, "invalid_policy", `maxTtl ${mt}`);
+  }
+  for (const cs of [NaN, Infinity, -Infinity, -1, 2.5]) {
+    assert.equal(bad({ clockSkewSeconds: cs }).reason, "invalid_policy", `skew ${cs}`);
+  }
+  for (const n of [NaN, Infinity, -Infinity, -1, 10.5]) {
+    assert.equal(M.verifyAccessTokenClaims(c, POLICY, n).reason, "invalid_time", `now ${n}`);
+  }
+});
+
+test("P1: Infinity policy inputs cannot fail open; exact expiry fails closed", () => {
+  // over-long TTL: an Infinity maxTtl is rejected as invalid_policy, never ok
+  assert.notEqual(M.verifyAccessTokenClaims(claims({ iat: 1000, exp: 1000 + 4000 }), { ...POLICY, maxTtlSeconds: Infinity }, 1100).ok, true);
+  // expired token stays not-ok even if a caller passes Infinity skew
+  assert.notEqual(M.verifyAccessTokenClaims(claims(), { ...POLICY, clockSkewSeconds: Infinity }, 5000).ok, true);
+  // exact boundary: exp == now -> expired
+  assert.equal(M.verifyAccessTokenClaims(claims({ iat: 1000, exp: 1900 }), POLICY, 1900).reason, "expired");
+});
+
+// ============ FIX-P2-001: strict refresh token contract schema ============
+test("P2-001: contract refreshTokenSchema accept/reject matrix (single source)", () => {
+  const good = M.generateRefreshToken();
+  assert.equal(C.refreshTokenSchema.safeParse(good).success, true);
+  const rejects = [
+    "x",
+    "gbrt_v2_" + "a".repeat(43), // wrong prefix
+    "wrong_" + "a".repeat(43),
+    "gbrt_v1_" + "a".repeat(10), // body too short
+    "gbrt_v1_", // empty body
+    "gbrt_v1_" + "a".repeat(43) + "+", // '+'
+    "gbrt_v1_" + "a".repeat(43) + "/", // '/'
+    "gbrt_v1_" + "a".repeat(43) + "=", // '='
+    "gbrt_v1_" + "a".repeat(20) + " " + "a".repeat(23), // space
+    "gbrt_v1_" + "a".repeat(300) // too long
+  ];
+  for (const t of rejects) assert.equal(C.refreshTokenSchema.safeParse(t).success, false, JSON.stringify(t.slice(0, 14)));
+  for (const code of [13, 10, 9, 0]) {
+    assert.equal(C.refreshTokenSchema.safeParse("gbrt_v1_" + "a".repeat(43) + String.fromCharCode(code)).success, false, `ctrl ${code}`);
+  }
+  // request / result / logout all enforce the SAME rule
+  assert.equal(C.mobileRefreshRequestSchema.safeParse({ refreshToken: "x" }).success, false);
+  assert.equal(C.mobileLogoutRequestSchema.safeParse({ refreshToken: "x" }).success, false);
+  assert.equal(C.mobileRefreshResultSchema.safeParse({ accessToken: "a", refreshToken: "x", accessTokenExpiresInSeconds: 900, deviceSessionId: "s1" }).success, false);
+  assert.equal(C.mobileRefreshRequestSchema.safeParse({ refreshToken: good }).success, true);
+  // crypto util agrees with the contract (no drift)
+  assert.equal(M.isValidRefreshTokenFormat(good), true);
+  assert.equal(M.isValidRefreshTokenFormat("x"), false);
+});
+
+// ============ FIX-P2-002: store time / counter invariants ============
+async function seedFor(over = {}) {
+  const store = new M.InMemoryDeviceSessionStore();
+  const h0 = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  await store.createSession({
+    id: "s1", userId: "u1", tokenFamilyId: "f1", refreshTokenHash: h0,
+    createdAt: 100, idleExpiresAt: 10000, absoluteExpiresAt: 5000, ...over
+  });
+  return { store, h0 };
+}
+
+test("P2-002: newIdle clamps to absolute; never extends past ceiling", async () => {
+  const hNew = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  let { store, h0 } = await seedFor();
+  let r = await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 9000, now: 200 });
+  assert.equal(r.status, "rotated");
+  assert.equal(r.session.idleExpiresAt, 5000); // clamped to absolute, not 9000
+  assert.ok(r.session.idleExpiresAt <= 5000);
+
+  ({ store, h0 } = await seedFor());
+  r = await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 5000, now: 200 });
+  assert.equal(r.session.idleExpiresAt, 5000); // == absolute allowed
+});
+
+test("P2-002: unsafe time/newIdle inputs -> invalid_input, no mutation", async () => {
+  const hNew = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  const bads = [
+    { newIdleExpiresAt: 200 }, // == now
+    { newIdleExpiresAt: 100 }, // < now
+    { newIdleExpiresAt: NaN },
+    { newIdleExpiresAt: Infinity },
+    { newIdleExpiresAt: -Infinity },
+    { newIdleExpiresAt: 2000.5 },
+    { now: NaN },
+    { now: 3.5 },
+    { now: -1 }
+  ];
+  for (const bad of bads) {
+    const { store, h0 } = await seedFor();
+    const r = await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 2000, now: 200, ...bad });
+    assert.equal(r.status, "invalid_input", JSON.stringify(bad));
+    const s = await store.findById("s1"); // reject path must not mutate
+    assert.equal(s.rotationCounter, 0);
+    assert.equal(s.refreshTokenHash, h0);
+    assert.equal(s.idleExpiresAt, 10000);
+  }
+});
+
+test("P2-002: absolute/idle expiry -> expired; unsafe counter -> invalid_input", async () => {
+  const hNew = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  let { store, h0 } = await seedFor({ absoluteExpiresAt: 150 });
+  assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 210, now: 200 })).status, "expired");
+  ({ store, h0 } = await seedFor({ idleExpiresAt: 150 }));
+  assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 210, now: 200 })).status, "expired");
+  // counter at unsafe boundary
+  ({ store, h0 } = await seedFor({ rotationCounter: M.MAX_ROTATION_COUNTER, idleExpiresAt: 1e9, absoluteExpiresAt: 1e9 }));
+  assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: M.MAX_ROTATION_COUNTER, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 5000, now: 200 })).status, "invalid_input");
+});
+
+test("P2-002: double concurrent CAS still yields one rotated, one conflict", async () => {
+  const { store, h0 } = await seedFor({ idleExpiresAt: 1e9, absoluteExpiresAt: 1e9 });
+  const hA = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  const hB = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  const base = { sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newIdleExpiresAt: 20000, now: 200 };
+  const [r1, r2] = await Promise.all([
+    store.rotateRefreshTokenAtomically({ ...base, newRefreshTokenHash: hA }),
+    store.rotateRefreshTokenAtomically({ ...base, newRefreshTokenHash: hB })
+  ]);
+  assert.deepEqual([r1.status, r2.status].sort(), ["conflict", "rotated"]);
+  assert.equal((await store.findById("s1")).rotationCounter, 1);
+});
+
+// ============ FIX-P2-003A: audit reason controlled enum ============
+test("P2-003A: audit reason is a controlled enum, no free text", () => {
+  for (const reason of M.MOBILE_AUTH_AUDIT_REASONS) {
+    assert.equal(M.buildMobileAuthAuditEvent({ event: "mobile_refresh_rotated", occurredAt: 1, reason }).reason, reason);
+  }
+  const injections = ["unknown_reason", "gbrt_v1_leakedtoken", "a@b.com", "line\nbreak", "tab\there", String.fromCharCode(0), "x".repeat(100), {}, []];
+  for (const reason of injections) {
+    assert.throws(() => M.buildMobileAuthAuditEvent({ event: "mobile_session_created", occurredAt: 1, reason }), M.AuditValidationError);
+  }
+});
+
+// ============ FIX-P2-003B: device label hardening ============
+test("P2-003B: device label accepts human/Unicode names, rejects unsafe/blank", () => {
+  assert.equal(M.sanitizeDeviceMetadata({ deviceLabel: "Ann's iPhone" }).ok, true);
+  assert.equal(M.sanitizeDeviceMetadata({ deviceLabel: "小明的手机" }).ok, true); // CJK
+  assert.equal(M.sanitizeDeviceMetadata({ deviceLabel: "📱 Phone" }).ok, true); // emoji
+  const trimmed = M.sanitizeDeviceMetadata({ deviceLabel: "  Pixel 8  " });
+  assert.equal(trimmed.ok, true);
+  assert.equal(trimmed.metadata.deviceLabel, "Pixel 8"); // surrounding whitespace trimmed
+  assert.equal(M.sanitizeDeviceMetadata({ deviceLabel: "   " }).ok, false); // pure whitespace
+  for (const code of [13, 10, 9, 0, 0x7f, 0x2028, 0x2029]) {
+    assert.equal(M.sanitizeDeviceMetadata({ deviceLabel: "A" + String.fromCharCode(code) + "B" }).ok, false, `code ${code}`);
+  }
+  assert.equal(M.sanitizeDeviceMetadata({ deviceLabel: "a".repeat(65) }).ok, false); // too long
 });

@@ -45,12 +45,35 @@ export const accessTokenClaimsSchema = z
   .strict();
 export type AccessTokenClaims = z.infer<typeof accessTokenClaimsSchema>;
 
-/** A refresh token on the wire is an opaque, length-bounded string. */
-const refreshTokenWireSchema = z.string().min(1).max(256);
+/**
+ * Canonical refresh-token format — the SINGLE source of truth. Both the public
+ * contract schemas below and lib/mobile-auth/v1/refresh-token.ts consume these,
+ * so the format can never drift between the wire contract and the crypto util.
+ *
+ * Format: gbrt_v1_<base64url body>. The body is base64url ONLY (A-Z a-z 0-9 _ -),
+ * so `+`, `/`, `=`, whitespace, and control characters are rejected, and it must
+ * be long enough to encode >= 32 random bytes.
+ */
+export const REFRESH_TOKEN_PREFIX = "gbrt_v1_" as const;
+/** base64url of 32 bytes = 43 chars. */
+export const REFRESH_TOKEN_MIN_BODY_LENGTH = 43;
+export const REFRESH_TOKEN_MAX_LENGTH = 256;
+
+export const REFRESH_TOKEN_REGEX = new RegExp(
+  `^${REFRESH_TOKEN_PREFIX}[A-Za-z0-9_-]{${REFRESH_TOKEN_MIN_BODY_LENGTH},}$`
+);
+
+/** Strict refresh-token string schema (prefix + base64url body, length-bounded). */
+export const refreshTokenSchema = z
+  .string()
+  .min(1)
+  .max(REFRESH_TOKEN_MAX_LENGTH)
+  .regex(REFRESH_TOKEN_REGEX);
+export type RefreshTokenString = z.infer<typeof refreshTokenSchema>;
 
 export const mobileRefreshRequestSchema = z
   .object({
-    refreshToken: refreshTokenWireSchema
+    refreshToken: refreshTokenSchema
   })
   .strict();
 export type MobileRefreshRequest = z.infer<typeof mobileRefreshRequestSchema>;
@@ -62,7 +85,7 @@ export type MobileRefreshRequest = z.infer<typeof mobileRefreshRequestSchema>;
 export const mobileRefreshResultSchema = z
   .object({
     accessToken: z.string().min(1),
-    refreshToken: refreshTokenWireSchema,
+    refreshToken: refreshTokenSchema,
     accessTokenExpiresInSeconds: z.number().int().positive(),
     deviceSessionId: deviceSessionIdSchema
   })
@@ -71,7 +94,7 @@ export type MobileRefreshResult = z.infer<typeof mobileRefreshResultSchema>;
 
 export const mobileLogoutRequestSchema = z
   .object({
-    refreshToken: refreshTokenWireSchema
+    refreshToken: refreshTokenSchema
   })
   .strict();
 export type MobileLogoutRequest = z.infer<typeof mobileLogoutRequestSchema>;

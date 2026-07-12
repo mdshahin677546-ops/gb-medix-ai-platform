@@ -16,6 +16,34 @@ export const ALLOWED_DEVICE_METADATA_KEYS = [
   "locale"
 ] as const;
 
+export const DEVICE_LABEL_MAX_LENGTH = 64;
+
+/**
+ * Reject C0 controls, DEL, and the Unicode line/paragraph separators (U+2028 /
+ * U+2029) — these enable log/UI injection. All other Unicode (accents, CJK,
+ * emoji) is allowed; the label is NOT restricted to ASCII and is never turned
+ * into a persistent device fingerprint.
+ */
+function hasUnsafeLabelChars(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f || code === 0x2028 || code === 0x2029) return true;
+  }
+  return false;
+}
+
+/**
+ * A human-readable device name: no control/separator chars, surrounding
+ * whitespace trimmed, and not blank after trimming.
+ */
+export const deviceLabelSchema = z
+  .string()
+  .min(1)
+  .max(DEVICE_LABEL_MAX_LENGTH)
+  .refine((s) => !hasUnsafeLabelChars(s))
+  .transform((s) => s.trim())
+  .refine((s) => s.length > 0);
+
 export const deviceMetadataSchema = z
   .object({
     platform: z.enum(["ios", "android"]).optional(),
@@ -25,7 +53,7 @@ export const deviceMetadataSchema = z
       .max(32)
       .regex(/^[0-9A-Za-z.+-]+$/)
       .optional(),
-    deviceLabel: z.string().min(1).max(64).optional(),
+    deviceLabel: deviceLabelSchema.optional(),
     locale: z.enum(["en", "zh"]).optional()
   })
   .strict();

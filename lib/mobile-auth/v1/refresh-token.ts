@@ -1,4 +1,10 @@
 import { randomBytes, createHmac, timingSafeEqual } from "crypto";
+import {
+  REFRESH_TOKEN_PREFIX,
+  REFRESH_TOKEN_MIN_BODY_LENGTH,
+  REFRESH_TOKEN_MAX_LENGTH,
+  refreshTokenSchema
+} from "../../api-contract/v1/mobile-auth";
 
 /**
  * Refresh token security utilities (pure, no I/O, no env reads).
@@ -7,16 +13,22 @@ import { randomBytes, createHmac, timingSafeEqual } from "crypto";
  * the plaintext is returned exactly once at creation/rotation and never enters a
  * store, log, audit event, or error. The pepper is injected (never hardcoded,
  * never read from .env here) and never appears in an error message.
+ *
+ * The token FORMAT rule lives in the public contract (refreshTokenSchema); this
+ * module imports it so the wire contract and the crypto util share one rule and
+ * can never drift. The contract does not depend on this module (no cycle).
  */
 
-export const REFRESH_TOKEN_PREFIX = "gbrt_v1_";
+// Re-export the canonical contract constants for convenient single-import use.
+export {
+  REFRESH_TOKEN_PREFIX,
+  REFRESH_TOKEN_MIN_BODY_LENGTH,
+  REFRESH_TOKEN_MAX_LENGTH
+} from "../../api-contract/v1/mobile-auth";
+
 export const REFRESH_TOKEN_RANDOM_BYTES = 32;
-/** base64url of 32 bytes = 43 chars; require at least that much entropy. */
-export const REFRESH_TOKEN_MIN_BODY_LENGTH = 43;
-export const REFRESH_TOKEN_MAX_LENGTH = 256;
 export const MIN_PEPPER_LENGTH = 32;
 
-const BODY_RE = /^[A-Za-z0-9_-]+$/;
 const HEX_RE = /^[0-9a-f]+$/;
 
 /** Errors here are intentionally value-free (no token / hash / pepper echoed). */
@@ -32,15 +44,9 @@ export function generateRefreshToken(): string {
   return `${REFRESH_TOKEN_PREFIX}${body}`;
 }
 
-/** Strict format check: prefix, safe charset, entropy floor, and max length. */
+/** Strict format check — delegates to the single canonical contract schema. */
 export function isValidRefreshTokenFormat(token: unknown): token is string {
-  if (typeof token !== "string") return false;
-  if (token.length === 0 || token.length > REFRESH_TOKEN_MAX_LENGTH) return false;
-  if (!token.startsWith(REFRESH_TOKEN_PREFIX)) return false;
-  const body = token.slice(REFRESH_TOKEN_PREFIX.length);
-  if (body.length < REFRESH_TOKEN_MIN_BODY_LENGTH) return false;
-  if (!BODY_RE.test(body)) return false;
-  return true;
+  return refreshTokenSchema.safeParse(token).success;
 }
 
 function assertPepper(pepper: unknown): asserts pepper is string {

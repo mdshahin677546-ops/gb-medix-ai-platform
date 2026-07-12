@@ -25,6 +25,8 @@ export type CreateSessionInput = {
   createdAt: number;
   idleExpiresAt: number;
   absoluteExpiresAt: number;
+  /** Optional starting counter (e.g. rehydrating a stored session). Defaults to 0. */
+  rotationCounter?: number;
 };
 
 export type RotateInput = {
@@ -41,7 +43,12 @@ export type RotateResult =
   | { status: "conflict" }
   | { status: "not_found" }
   | { status: "not_active" }
-  | { status: "expired" };
+  | { status: "expired" }
+  /** Programmer/time error (non-finite/non-integer/out-of-range input). Carries no echoed value. */
+  | { status: "invalid_input" };
+
+/** Guard against rotationCounter reaching an unsafe (non-exact) integer region. */
+export const MAX_ROTATION_COUNTER = Number.MAX_SAFE_INTEGER - 1;
 
 export interface DeviceSessionStore {
   findById(id: string): Promise<DeviceSession | null>;
@@ -81,12 +88,16 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
     if (this.byId.has(input.id)) {
       throw new Error("Device session id already exists.");
     }
+    const startCounter = input.rotationCounter ?? 0;
+    if (!Number.isInteger(startCounter) || startCounter < 0) {
+      throw new Error("Invalid rotationCounter.");
+    }
     const session: DeviceSession = {
       id: input.id,
       userId: input.userId,
       tokenFamilyId: input.tokenFamilyId,
       status: "active",
-      rotationCounter: 0,
+      rotationCounter: startCounter,
       refreshTokenHash: input.refreshTokenHash,
       createdAt: input.createdAt,
       lastUsedAt: input.createdAt,
@@ -100,6 +111,10 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
   }
 
   async rotateRefreshTokenAtomically(input: RotateInput): Promise<RotateResult> {
+    // Validate time inputs BEFORE touching any session state (fail closed, no echo).
+    if (!Number.isInteger(input.now) || input.now < 0) return { status: "invalid_input" };
+    if (!Number.isInteger(input.newIdleExpiresAt)) return { status: "invalid_input" };
+
     const s = this.byId.get(input.sessionId);
     if (!s) return { status: "not_found" };
     if (s.status !== "active") return { status: "not_active" };
@@ -111,11 +126,20 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
     ) {
       return { status: "conflict" };
     }
-    // Record the now-old hash so a later replay of it is detectable.
+    // rotationCounter must stay a safe, exact, monotonically increasing integer.
+    if (!Number.isInteger(s.rotationCounter) || s.rotationCounter >= MAX_ROTATION_COUNTER) {
+      return { status: "invalid_input" };
+    }
+    // The new idle deadline must be strictly in the future...
+    if (input.newIdleExpiresAt <= input.now) return { status: "invalid_input" };
+    // ...and can NEVER extend the session past its absolute ceiling: clamp down.
+    const newIdle = Math.min(input.newIdleExpiresAt, s.absoluteExpiresAt);
+
+    // All checks passed — commit atomically (single-threaded, no await above).
     this.consumed.set(s.refreshTokenHash, s.id);
     s.rotationCounter += 1;
     s.refreshTokenHash = input.newRefreshTokenHash;
-    s.idleExpiresAt = input.newIdleExpiresAt;
+    s.idleExpiresAt = newIdle;
     s.lastUsedAt = input.now;
     return { status: "rotated", session: { ...s } };
   }

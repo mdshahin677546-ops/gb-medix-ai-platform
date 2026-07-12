@@ -41,6 +41,26 @@ export const FORBIDDEN_AUDIT_FIELDS = [
   "paymentInfo"
 ] as const;
 
+/**
+ * `reason` is a CONTROLLED enum — never free text. This makes it impossible to
+ * smuggle a token / email / health text / newline-injection payload through the
+ * audit reason field. Only these fixed, safe codes are accepted.
+ */
+export const MOBILE_AUTH_AUDIT_REASONS = [
+  "created",
+  "issued",
+  "rotated",
+  "replay_detected",
+  "user_logout",
+  "user_logout_all",
+  "session_version_mismatch",
+  "token_family_revoked",
+  "expired",
+  "compromised",
+  "admin"
+] as const;
+export type MobileAuthAuditReason = (typeof MOBILE_AUTH_AUDIT_REASONS)[number];
+
 export const mobileAuthAuditEventSchema = z
   .object({
     event: z.enum(MOBILE_AUTH_AUDIT_EVENTS),
@@ -48,7 +68,8 @@ export const mobileAuthAuditEventSchema = z
     userId: z.string().min(1).max(128).optional(),
     deviceSessionId: z.string().min(1).max(128).optional(),
     tokenFamilyId: z.string().min(1).max(128).optional(),
-    reason: z.string().min(1).max(64).optional()
+    // Controlled enum only — no arbitrary details/message/context escape hatch.
+    reason: z.enum(MOBILE_AUTH_AUDIT_REASONS).optional()
   })
   .strict();
 export type MobileAuthAuditEvent = z.infer<typeof mobileAuthAuditEventSchema>;
