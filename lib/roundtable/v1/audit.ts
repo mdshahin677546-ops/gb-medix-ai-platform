@@ -108,7 +108,7 @@ const FORBIDDEN_VALUE_PATTERNS: RegExp[] = [
   /(api[_-]?key|secret|passwd|password|cookie|authorization)/i,
   /(access|refresh|session|auth)[_-]?token/i, // accessToken / refresh_token / … (case folded)
   /token\s*[=:]/i, // token assignment in any form
-  /%(25)*(40|3d)/i, // percent-encoded @ / = markers at any nesting depth
+  /%(25)*(40|3d|20|5f|2d)/i, // percent-encoded @ = space _ - markers at any nesting depth
   /[?&](token|key|secret|password|auth|session|sig)=/i, // sensitive URL query params
   /postgres(ql)?:\/\//i,
   /(mrn|medical\s*record|病历号|病案号|病历编号)/i,
@@ -124,31 +124,43 @@ const CJK_RUN_RE = /[一-鿿]{12,}/;
 
 const JSON_LIKE_RE = /^\s*[[{]|["'][a-zA-Z0-9_]+["']\s*:/;
 
+/** Maximum bounded percent-decode depth for metadata scanning. */
+export const AUDIT_MAX_DECODE_DEPTH = 5;
+
 /**
- * Percent-decoding variants for scanning: the raw value plus (bounded) one
- * and two decode layers, so `user%40example.com` and `user%2540example.com`
- * are seen as emails. Invalid percent-encoding fails CLOSED — a value that
- * cannot be decoded is rejected outright, never passed through unscanned.
+ * Bounded LOOP percent-decoding for scanning (RR-P1-003): starting from the
+ * raw value, decodeURIComponent is applied repeatedly — every layer is
+ * returned for a full sensitive-content scan — until the value contains no
+ * "%", a decode pass is a no-op, or AUDIT_MAX_DECODE_DEPTH layers were
+ * produced. Fail closed on every abnormal path: invalid or truncated
+ * percent-encoding at ANY layer throws, and a value that still carries
+ * percent-encoding after the maximum depth throws instead of passing
+ * through unscanned. The 128-char cap on the original value bounds every
+ * layer (decoding never grows a string), so the loop always terminates.
  */
 function collectScanVariants(key: string, value: string): string[] {
   const variants = [value];
-  if (value.includes("%")) {
-    let first: string;
+  let current = value;
+  for (let depth = 0; depth < AUDIT_MAX_DECODE_DEPTH; depth++) {
+    if (!current.includes("%")) {
+      return variants;
+    }
+    let decoded: string;
     try {
-      first = decodeURIComponent(value);
+      decoded = decodeURIComponent(current);
     } catch {
       throw new Error(`Audit metadata value for ${key} contains invalid percent-encoding`);
     }
-    if (first !== value) variants.push(first);
-    if (first.includes("%")) {
-      let second: string;
-      try {
-        second = decodeURIComponent(first);
-      } catch {
-        throw new Error(`Audit metadata value for ${key} contains invalid nested percent-encoding`);
-      }
-      if (second !== first) variants.push(second);
+    if (decoded === current) {
+      return variants;
     }
+    variants.push(decoded);
+    current = decoded;
+  }
+  if (current.includes("%")) {
+    throw new Error(
+      `Audit metadata value for ${key} still contains percent-encoding after ${AUDIT_MAX_DECODE_DEPTH} decode layers`
+    );
   }
   return variants;
 }

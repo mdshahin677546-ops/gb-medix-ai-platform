@@ -106,14 +106,26 @@ const PRIVACY_COMPACT_PATTERNS: RegExp[] = [
 // academically-wrapped individual directives.
 const HIGH_RISK_COMPACT_PATTERNS: RegExp[] = [
   // Generalized personal-subject + illness-uncertainty / diagnosis-judgment
-  // request (RR-P1-001): 我/本人 followed within a short window by any
-  // "suffer from / have contracted" verb — covers 罹患/患有/疑似患/可能得了
-  // and similar synonyms, not just fixed sentences. (?!们) keeps plural
-  // 我们 (population-level phrasing) out of the individual rule.
-  /(我(?!们)|本人).{0,6}(罹患|患有|患上|患了|得了|得上|得的是|染上)/,
+  // request (RR-P1-001, all rounds): 我/本人 followed within a short window
+  // by a "suffer from" verb, an uncertainty marker (可能/疑似/是否/是不是),
+  // or 疑似/确诊 directly — semantic shapes, not fixed sentences. The
+  // negative lookahead (?!们|国|省|市|县|院|校) keeps population-level
+  // phrasing (我们/我国/我省…) out of the individual rule.
+  /(我(?!们|国|省|市|县|院|校)|本人).{0,6}(罹患|患有|患上|患了|得了|得上|得的是|染上)/,
+  /(我(?!们|国|省|市|县|院|校)|本人).{0,4}(疑似|确诊)/,
+  /(我(?!们|国|省|市|县|院|校)|本人).{0,4}(是不是|是否|会不会|有没有可能|有可能是?|可能是)/,
   /(患|得)了?(什么|啥)(病|症)/,
+  // English personal / single-patient diagnosis shapes: modal + I + have,
+  // modal + I + be, "am I <condition>", "whether/mean I am", and modal +
+  // this/the patient + have/be. Population phrasing ("risk factors for
+  // diabetes", "communicate uncertainty to patients") stays unmatched.
   /(might|could|do|can|will|would|does)i(likely|possibly|actually|really)?(to)?have/,
+  /(could|might|can|would|will)i(be|become)/,
+  /(whether|if|means?(that)?)iam/,
+  /ami(a|an)?(likely|possibly|really|actually|now)?(pre)?(diabetic|hypertensive|anemic|anaemic|asthmatic|depressed|anxious|infected|positive|sick|ill)/,
   /ami(likely|possibly|atrisk)?(to)?have/,
+  /(could|might|does|do|can|would|will)(this|that|the|my|a)patient(have|has|be|is|suffer)/,
+  /(whether|if)(this|that|the|my|a)patient(has|have|is|suffers?)/,
   /(symptom|sign)s?(these)?(mean|suggest|indicate)(that)?i(might|could|may)?(have|had)/,
   /determine(whether|if)i(have|had|am)/,
   /我(是不是|得了|患了|有没有|到底是不是)/,

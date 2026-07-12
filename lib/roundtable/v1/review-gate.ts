@@ -17,26 +17,35 @@ import { z } from "zod";
 import {
   CONTENT_LIFECYCLE_STATUSES,
   ContentLifecycleStatus,
-  CONTROL_CHARS_RE,
   isValidIsoDateTime,
 } from "./types";
 
 export const REVIEWER_ID_MAX_LENGTH = 128;
 
+// Everything except the plain ASCII space that may surround an id: C0/DEL/C1
+// controls, ALL Unicode whitespace (\s covers tab/LF/CR, NBSP U+00A0,
+// U+1680, U+2000..U+200A, LINE SEPARATOR U+2028, PARAGRAPH SEPARATOR U+2029,
+// U+202F, U+205F, ideographic space U+3000, U+FEFF) and zero-width /
+// invisible characters. Tested on the RAW string — never after a trim.
+const REVIEWER_ID_FORBIDDEN_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200b-\u200f\u2060\ufeff\u00ad]|[^\S ]/;
+
 /**
- * Opaque external reviewer id: must be a string, non-blank after trim,
- * bounded, and free of control characters. The control-character check runs
- * on the RAW string BEFORE any trim/transform, so "reviewer\n" (or tab/CR,
- * leading or trailing, C0/DEL/C1) can never slip through by being trimmed
- * away. Plain ASCII spaces around an id remain allowed and are trimmed. It
- * is NOT an auth credential and NOT proof of doctor identity/qualification.
+ * Opaque external reviewer id. Validation order is RAW-first: the string is
+ * rejected if it contains any control character, any Unicode whitespace or
+ * separator other than the plain ASCII space, or any zero-width character —
+ * BEFORE any trim/transform, so U+2028/U+2029 (or tab/LF/CR) can never slip
+ * through by sitting where a trim would delete them. Only leading/trailing
+ * ASCII spaces are then stripped; the id core must be non-empty and may not
+ * contain interior spaces. It is NOT an auth credential and NOT proof of
+ * doctor identity/qualification.
  */
 export const ReviewerIdSchema = z
   .string()
   .max(REVIEWER_ID_MAX_LENGTH, `reviewer id must be at most ${REVIEWER_ID_MAX_LENGTH} characters`)
-  .refine((raw) => !CONTROL_CHARS_RE.test(raw), "reviewer id must not contain control characters")
-  .transform((s) => s.trim())
-  .refine((s) => s.length > 0, "reviewer id must be non-blank after trim");
+  .refine((raw) => !REVIEWER_ID_FORBIDDEN_RE.test(raw), "reviewer id must not contain control, whitespace or invisible characters (plain ASCII spaces only as padding)")
+  .transform((s) => s.replace(/^ +/, "").replace(/ +$/, ""))
+  .refine((s) => s.length > 0, "reviewer id must be non-blank after removing ASCII-space padding")
+  .refine((s) => !s.includes(" "), "reviewer id must not contain interior spaces");
 
 export const MEDICAL_REVIEW_DECISIONS = [
   "approved",

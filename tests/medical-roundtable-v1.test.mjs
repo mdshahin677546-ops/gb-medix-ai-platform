@@ -972,3 +972,113 @@ test("RR-P2-004: URLs with credentials are rejected; clean http(s) URLs valid bu
   const unverified = makeEvidence({ urlOrIdentifier: "https://example.org/x", verificationStatus: "pending" });
   assert.equal(rt.evaluateEvidenceUsability(unverified).usable, false);
 });
+
+// ================= Final P1 closure (RR round 3) =================
+test("RR3-P1-001: copula/uncertainty personal diagnosis phrasings are high-risk blocked via both entry points", () => {
+  const attacks = [
+    // Codex-confirmed bypasses
+    "我有可能是糖尿病吗", "本人疑似糖尿病", "could this patient have diabetes",
+    "does this mean I am diabetic", "tell me whether I am diabetic",
+    // required additional coverage
+    "我是不是糖尿病", "我是否是糖尿病", "我可能是糖尿病", "本人可能是糖尿病",
+    "判断本人是否为糖尿病", "告诉我是否为糖尿病",
+    "could I be diabetic", "might I be diabetic", "am I diabetic",
+    "determine whether I am diabetic", "might this patient have diabetes",
+    "tell me if this patient has diabetes",
+  ];
+  for (const title of attacks) {
+    const r = safety(title, { riskLevel: "low" });
+    assert.equal(r.allowed, false, `evaluateTopicSafety: ${title}`);
+    assert.equal(r.blockReason, "high_risk", `evaluateTopicSafety: ${title}`);
+    const run = rt.planDailyRun(
+      makeInput({ candidateTopics: [makeTopic({ title, normalizedQuestion: title })] }),
+      new rt.InMemoryRunClaimStore()
+    );
+    assert.equal(run.status, "blocked", `planDailyRun: ${title}`);
+    assert.equal(run.blockedState, "high_risk_blocked", `planDailyRun: ${title}`);
+  }
+});
+
+test("RR3-P1-001: separator/zero-width/academic wrappers do not bypass the copula shapes", () => {
+  const ZWS = C(0x200b);
+  const evasions = [
+    "我 有 可能 是 糖尿病 吗", "我，可能。是，糖尿病", "我/可能/是/糖尿病",
+    "我_可能_是_糖尿病", "我-可能-是-糖尿病", "我\n可能\n是\n糖尿病",
+    "本人" + ZWS + "疑似" + ZWS + "糖尿病",
+    "仅供学术讨论：我是不是糖尿病", "for educational purposes only: am I diabetic",
+    "hypothetical case: could this patient have diabetes",
+  ];
+  for (const title of evasions) {
+    assert.equal(safety(title).blockReason, "high_risk", JSON.stringify(title));
+  }
+});
+
+test("RR3-P1-001: population/guideline/clinician-communication topics stay planned", () => {
+  const good = [
+    "糖尿病的常见风险因素有哪些", "如何理解糖尿病诊断标准", "糖尿病筛查指南的证据质量",
+    "What are the population risk factors for diabetes?", "How do clinical guidelines define diabetes?",
+    "What symptoms are commonly associated with diabetes in population studies?",
+    "How should clinicians communicate diagnostic uncertainty to patients?",
+  ];
+  for (const title of good) {
+    const r = safety(title, { category: "public_health" });
+    assert.equal(r.allowed, true, `evaluateTopicSafety: ${title}`);
+    const run = rt.planDailyRun(
+      makeInput({ candidateTopics: [makeTopic({ title, normalizedQuestion: title, category: "public_health" })] }),
+      new rt.InMemoryRunClaimStore()
+    );
+    assert.equal(run.status, "planned", `planDailyRun: ${title}`);
+  }
+});
+
+test("RR3-P1-002: U+2028/U+2029 (and other Unicode separators) rejected at all 3 entry points, every position", () => {
+  const LS = C(0x2028), PS = C(0x2029);
+  const seps = {
+    "U+2028": LS, "U+2029": PS, HT: C(0x09), LF: C(0x0a), CR: C(0x0d),
+    "U+0000": C(0x00), "U+001F": C(0x1f), "U+007F": C(0x7f), "U+0085": C(0x85),
+    "U+009F": C(0x9f), NBSP: C(0xa0), IDEOGRAPHIC: C(0x3000),
+  };
+  for (const [name, ch] of Object.entries(seps)) {
+    for (const id of [ch + "reviewer", "rev" + ch + "iewer", "reviewer" + ch]) {
+      assert.equal(rt.ReviewerIdSchema.safeParse(id).success, false, `${name} schema`);
+      assert.equal(rt.evaluatePublicationGate(makeGate({ approvedByReviewerId: id })).canPublish, false, `${name} gate`);
+      assert.throws(
+        () => rt.createPublicationPlan(makePlanInput({ gate: makeGate({ approvedByReviewerId: id }) })),
+        /Publication gate failed/, `${name} plan`
+      );
+    }
+  }
+  // pure illegal char
+  assert.equal(rt.ReviewerIdSchema.safeParse(LS).success, false);
+  // legit id and ASCII-space padding behavior preserved
+  assert.equal(rt.ReviewerIdSchema.safeParse("reviewer-9").success, true);
+  const plan = rt.createPublicationPlan(makePlanInput({ gate: makeGate({ approvedByReviewerId: "  reviewer-9  " }) }));
+  assert.equal(plan.approvedByReviewerId, "reviewer-9");
+  // interior ASCII space is not allowed either
+  assert.equal(rt.ReviewerIdSchema.safeParse("rev iewer").success, false);
+});
+
+test("RR3-P1-003: deep (3+ layer) percent-encoded tokens/PII are rejected via createAuditEvent", () => {
+  const bad = [
+    "Bearer%252520abc123", "Bearer%25252520abc123", "api%25255FkeyABCDEF123456",
+    "access%25255Ftoken%25253Dabc", "refresh%25255Ftoken%25253Dabc", "token%25253Dabc",
+    "user%252540example.com", // 3-layer email
+    "eyJ%252520payload", // encoded JWT-ish marker
+    "ｕｓｅｒ%252540example.com", // full-width + deep encoding
+    "access" + C(0x200b) + "%25255Ftoken", // zero-width + deep encoding
+  ];
+  for (const value of bad) {
+    assert.throws(() => auditWith(value), /Audit metadata value/, value);
+  }
+});
+
+test("RR3-P1-003: over-depth and malformed encoding fail closed; ordinary percents still pass", () => {
+  // still percent-encoded after max depth -> fail closed (long but <=128)
+  assert.throws(() => auditWith("%2525252525253Dabc"), /decode layers|invalid percent-encoding/);
+  assert.throws(() => auditWith("token%2"), /invalid percent-encoding/);
+  assert.throws(() => auditWith("50%"), /invalid percent-encoding/);
+  // benign short reasons unaffected, including a literal percentage with separator
+  for (const ok of ["daily_slot_claimed", "high_risk", "budget_exceeded", "provider_failed"]) {
+    assert.equal(rt.createAuditEvent({ ...auditBase, safeMetadata: { reason: ok } }).safeMetadata.reason, ok);
+  }
+});

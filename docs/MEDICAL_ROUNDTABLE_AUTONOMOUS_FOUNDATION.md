@@ -47,7 +47,7 @@
 3. **智能体共识不等于科学共识**:每份草稿的 `limitations` 必须包含免责声明「智能体一致意见不等于科学共识。」。
 4. **禁止个体医疗输出**:草稿出现 `diagnosis / prescription / medicationDose / stopMedication / diseaseProbability / guaranteedOutcome / patientSpecificTreatment` 即拒绝;传播素材出现诊断、处方、剂量或疗效承诺文案即拒绝。
 5. **患者个体问题不得变成论坛议题(规则级防线)**:统一规范化(NFKC、小写、零宽剥离、空白/标点折叠)后进行隐私与高风险匹配;`containsPatientData=false` 与 `riskLevel=low` 都不能覆盖文本检测;`riskLevel=high` 一律阻断;严重度取最严格:privacy > high_risk > duplicate > planned。**这只是规则级防线,不是生产级 PHI 或医疗安全分类器:高风险模式匹配不保证覆盖所有同义词与语言变体,隐私/审计检测也不是完整的 PHI/PII 识别,均存在漏检可能。**
-6. **审核人 ID 只是不透明标识**:原始字符串先查控制字符(C0/DEL/C1)再 trim、非空、限长,但**不是**医生身份或资质已验证的证明——医生认证不存在于本模块。
+6. **审核人 ID 只是不透明标识**:在任何 trim 之前对原始字符串拒绝控制字符(C0/DEL/C1)、U+2028/U+2029 及除普通 ASCII 空格外的一切 Unicode 空白/分隔符与零宽字符;仅前后 ASCII 空格可被剥离,ID 内部不允许任何空白。它**不是**医生身份或资质已验证的证明——医生认证不存在于本模块。
 
 ## 3. 模块结构(`lib/roundtable/v1/`)
 
@@ -117,7 +117,7 @@ scheduled → topic_selected → safety_precheck → agents_assigned
 ## 10. 复审后的剩余限制(必读)
 
 - 高风险/隐私文本检测为**规则级模式匹配**,不保证覆盖所有同义词、方言表达或跨语言变体;不是生产级医疗安全分类器。
-- 审计 metadata 检测(含百分号解码、token 形态、邮箱/电话/MRN 模式)**不是完整的 PHI/PII 识别**。
+- 审计 metadata 检测(含最多 5 层有界循环百分号解码并逐层扫描、token 形态、邮箱/电话/MRN 模式;超深或非法编码 fail-closed)**不是完整的 PHI/PII 识别**。
 - `reviewerId` 仅为外部系统提供的不透明标识,不代表医生身份或资质;医生认证、审核后台均未实现。
 - 发布路径终止于 `PublicationPlan`,真实发布与发布安全**依赖可信的上游审核系统**。
 - 当前没有生产级分类器、没有医生认证、没有真实证据检索、没有真实发布。
