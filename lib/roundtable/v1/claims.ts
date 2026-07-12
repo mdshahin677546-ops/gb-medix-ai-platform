@@ -1,12 +1,20 @@
 // EvidenceClaim schema and the claim-level gate that decides whether a set
 // of claims may enter medical review.
 //
+// Fail-closed rules (P1-002):
+// - an EMPTY claim set is never review-ready (no vacuous `every([])` pass);
+// - duplicate EvidenceSource ids are rejected outright — even identical
+//   objects — so a later "verified" write can never shadow an earlier
+//   "withdrawn" one;
+// - ID policy: ids are compared EXACTLY after trim; ids that collide
+//   case-insensitively are rejected as ambiguous duplicates.
 // A draft must NOT enter medical review when any critical claim has no
 // source, an unverified source, a withdrawn source, a source that does not
 // exist, or expired evidence without an explicit limitation note.
 
 import { z } from "zod";
 import { EvidenceSource } from "./evidence";
+import { CONTROL_CHARS_RE } from "./types";
 
 export const CLAIM_TYPES = [
   "confirmed_fact",
@@ -22,13 +30,22 @@ export const CRITICAL_CLAIM_TYPES = ["confirmed_fact", "current_consensus", "saf
 
 export const CLAIM_VERIFICATION_STATUSES = ["pending", "verified", "rejected"] as const;
 
+const ReferenceIdSchema = z
+  .string()
+  .max(200)
+  .refine((s) => s.trim().length > 0, "referenced evidence id must be non-blank after trim")
+  .refine((s) => !CONTROL_CHARS_RE.test(s), "referenced evidence id must not contain control characters");
+
 export const EvidenceClaimSchema = z
   .object({
-    id: z.string().min(1),
+    id: z
+      .string()
+      .max(200)
+      .refine((s) => s.trim().length > 0, "claim id must be non-blank after trim"),
     statement: z.string().min(1),
     claimType: z.enum(CLAIM_TYPES),
-    supportingEvidenceIds: z.array(z.string().min(1)),
-    opposingEvidenceIds: z.array(z.string().min(1)),
+    supportingEvidenceIds: z.array(ReferenceIdSchema),
+    opposingEvidenceIds: z.array(ReferenceIdSchema),
     confidence: z.number().finite().min(0).max(1),
     limitations: z.array(z.string()),
     verificationStatus: z.enum(CLAIM_VERIFICATION_STATUSES),
@@ -56,7 +73,33 @@ export function validateClaimsForMedicalReview(
   sources: readonly EvidenceSource[]
 ): ClaimReviewReadiness {
   const violations: ClaimViolation[] = [];
-  const sourceById = new Map(sources.map((s) => [s.id, s]));
+
+  // Fail closed: no claims means nothing to review — never "ready".
+  if (claims.length === 0) {
+    return { ready: false, violations: [{ claimId: "(claims)", reason: "no_claims_provided" }] };
+  }
+
+  // Duplicate evidence ids are ambiguous and rejected before any Map is
+  // built. Comparison uses trimmed ids; ids differing only by case are also
+  // treated as ambiguous duplicates (documented ID policy).
+  const seenCanonical = new Map<string, string>();
+  for (const source of sources) {
+    const exact = source.id.trim();
+    const canonical = exact.toLowerCase();
+    if (seenCanonical.has(canonical)) {
+      violations.push({
+        claimId: "(evidence)",
+        reason: `duplicate_evidence_id:${exact}`,
+      });
+      continue;
+    }
+    seenCanonical.set(canonical, exact);
+  }
+  if (violations.length > 0) {
+    return { ready: false, violations };
+  }
+
+  const sourceById = new Map(sources.map((s) => [s.id.trim(), s]));
 
   for (const raw of claims) {
     const claim = EvidenceClaimSchema.parse(raw);
@@ -68,7 +111,9 @@ export function validateClaimsForMedicalReview(
     if (critical && claim.verificationStatus !== "verified") {
       violations.push({ claimId: claim.id, reason: "critical_claim_not_verified" });
     }
-    for (const evidenceId of [...claim.supportingEvidenceIds, ...claim.opposingEvidenceIds]) {
+    for (const rawEvidenceId of [...claim.supportingEvidenceIds, ...claim.opposingEvidenceIds]) {
+      const evidenceId = rawEvidenceId.trim();
+      // Exact match after trim — "E1" does not resolve "e1" (fail closed).
       const source = sourceById.get(evidenceId);
       if (!source) {
         violations.push({ claimId: claim.id, reason: `evidence_source_not_found:${evidenceId}` });

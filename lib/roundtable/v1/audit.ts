@@ -1,11 +1,15 @@
 // Security audit events with a strict safeMetadata allowlist.
 //
-// Never logged: prompt text, chain-of-thought, patient health text, email
-// addresses, plaintext user ids, cookies, tokens, API keys, provider
-// request/response bodies, or real case identity data. Metadata keys outside
-// the allowlist and values that look like secrets/PII are rejected loudly.
+// Policy (P1-003): audit metadata may only carry restricted enum-like
+// strings, short ids, finite numbers and booleans. Free-form medical text,
+// objects, arrays and stringified JSON are rejected. Never logged: prompt
+// text, chain-of-thought, patient health text, names, email addresses,
+// phone numbers, MRNs, plaintext user ids, cookies, tokens, API keys,
+// provider request/response bodies, or real case identity data. Violations
+// throw loudly — nothing is silently redacted.
 
 import { z } from "zod";
+import { CONTROL_CHARS_RE, ZERO_WIDTH_RE, stableFingerprint } from "./types";
 
 export const AUDIT_EVENT_TYPES = [
   "run_scheduled",
@@ -58,18 +62,111 @@ export const SAFE_METADATA_KEYS = [
   "auditReference",
 ] as const;
 
-// Values that look like secrets, connection strings or email addresses are
-// rejected even under allowlisted keys. (These literals exist ONLY to forbid
-// such content from ever being logged.)
+// Sensitive key stems: even if a key were ever added to the allowlist, a
+// normalized key matching one of these is still rejected (defense in depth).
+const FORBIDDEN_KEY_STEMS = [
+  "patientname",
+  "firstname",
+  "lastname",
+  "email",
+  "phone",
+  "mobile",
+  "mrn",
+  "medicalrecord",
+  "prompt",
+  "fullprompt",
+  "healthtext",
+  "symptom",
+  "diagnosis",
+  "accesstoken",
+  "refreshtoken",
+  "token",
+  "secret",
+  "apikey",
+  "cookie",
+  "authorization",
+];
+const FORBIDDEN_KEY_EXACT = ["name", "病历号", "病历", "病案号"];
+
+export const AUDIT_METADATA_VALUE_MAX_LENGTH = 128;
+export const AUDIT_METADATA_VALUE_MAX_TOKENS = 5;
+
+// These allowlisted keys legitimately carry long hex/composed identifiers,
+// so the "long digit run" phone/MRN heuristic is skipped for them (a hex
+// fingerprint can rarely be all-decimal). All other value checks still run.
+const DIGIT_RUN_EXEMPT_KEYS = new Set(["topicFingerprint", "publicationIdempotencyKey", "auditReference"]);
+
+// Values that look like secrets, tokens, PII or connection strings are
+// rejected even under allowlisted keys. (These literals exist ONLY to
+// forbid such content from ever being logged.)
 const FORBIDDEN_VALUE_PATTERNS: RegExp[] = [
+  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/, // email (post-NFKC)
+  /\(at\)|＠/i, // obfuscated @ (after NFKC ＠ folds to @, kept as belt & braces)
+  /Bearer\s+/i,
+  /\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{4,}\./, // JWT shape
   /sk-[A-Za-z0-9]/,
-  /Bearer\s+ey/,
-  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/,
+  /(api[_-]?key|secret|passwd|password|cookie|authorization)/i,
+  /[?&](token|key|secret|password|auth|session|sig)=/i, // sensitive URL query params
   /postgres(ql)?:\/\//i,
-  /(api[_-]?key|secret|password|cookie|token)\s*[=:]/i,
+  /(mrn|medical\s*record|病历号|病案号|病历编号)/i,
+  /(patient\s*name|患者姓名|病人姓名)/i,
+  /\b(prompt|diagnosis|symptom)\b/i,
+  /(症状|主诉|病史|诊断|处方|用药记录)/, // zh medical free-text markers
+  /\d{3,}[-\s.]\d{3,}[-\s.]\d{3,}/, // grouped phone-like digits
 ];
 
-const MetadataValueSchema = z.union([z.string().max(300), z.number().finite(), z.boolean()]);
+// CJK has no word spacing, so the token heuristic cannot catch zh
+// free-form text — long consecutive CJK runs are rejected instead.
+const CJK_RUN_RE = /[一-鿿]{12,}/;
+
+const JSON_LIKE_RE = /^\s*[[{]|["'][a-zA-Z0-9_]+["']\s*:/;
+
+function assertSafeMetadataString(key: string, value: string): string {
+  if (ZERO_WIDTH_RE.test(value)) {
+    throw new Error(`Audit metadata value for ${key} contains zero-width characters`);
+  }
+  const normalized = value.normalize("NFKC").trim();
+  if (normalized.length === 0) {
+    throw new Error(`Audit metadata value for ${key} is empty after trim`);
+  }
+  if (normalized.length > AUDIT_METADATA_VALUE_MAX_LENGTH) {
+    throw new Error(`Audit metadata value for ${key} exceeds ${AUDIT_METADATA_VALUE_MAX_LENGTH} characters`);
+  }
+  if (CONTROL_CHARS_RE.test(normalized)) {
+    throw new Error(`Audit metadata value for ${key} contains control characters`);
+  }
+  if (normalized.split(/\s+/).length > AUDIT_METADATA_VALUE_MAX_TOKENS) {
+    throw new Error(`Audit metadata value for ${key} looks like free-form text (too many words)`);
+  }
+  if (CJK_RUN_RE.test(normalized)) {
+    throw new Error(`Audit metadata value for ${key} looks like free-form CJK text`);
+  }
+  if (JSON_LIKE_RE.test(normalized)) {
+    throw new Error(`Audit metadata value for ${key} looks like stringified JSON`);
+  }
+  for (const pattern of FORBIDDEN_VALUE_PATTERNS) {
+    if (pattern.test(normalized)) {
+      throw new Error(`Audit metadata value for ${key} matches a forbidden sensitive pattern`);
+    }
+  }
+  // Contiguous 8+ digit runs look like phones/MRNs/ids. Dates like
+  // 2026-07-11 stay legal (separators break the run); grouped phone digits
+  // are caught by the grouped pattern above.
+  if (!DIGIT_RUN_EXEMPT_KEYS.has(key) && /\d{8,}/.test(normalized)) {
+    throw new Error(`Audit metadata value for ${key} contains a long digit run (possible phone/MRN/id)`);
+  }
+  return normalized;
+}
+
+function normalizeKeyForPolicy(key: string): string {
+  return key.normalize("NFKC").toLowerCase().replace(/[^a-z0-9一-鿿]/g, "");
+}
+
+const MetadataValueSchema = z.union([
+  z.string().max(AUDIT_METADATA_VALUE_MAX_LENGTH),
+  z.number().finite(),
+  z.boolean(),
+]);
 
 export const AuditEventSchema = z
   .object({
@@ -98,27 +195,51 @@ export function createAuditEvent(input: CreateAuditEventInput): AuditEvent {
     throw new Error(`Unknown audit event type: ${String(input.eventType)}`);
   }
   const metadata = input.safeMetadata ?? {};
+  const sanitized: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(metadata)) {
     if (!(SAFE_METADATA_KEYS as readonly string[]).includes(key)) {
       throw new Error(`Audit metadata key is not allowlisted: ${key}`);
     }
+    const policyKey = normalizeKeyForPolicy(key);
+    if (
+      FORBIDDEN_KEY_EXACT.includes(policyKey) ||
+      FORBIDDEN_KEY_STEMS.some((stem) => policyKey.includes(stem))
+    ) {
+      throw new Error(`Audit metadata key is forbidden: ${key}`);
+    }
     if (typeof value === "string") {
-      for (const pattern of FORBIDDEN_VALUE_PATTERNS) {
-        if (pattern.test(value)) {
-          throw new Error(`Audit metadata value for ${key} matches a forbidden sensitive pattern`);
-        }
+      sanitized[key] = assertSafeMetadataString(key, value);
+    } else if (typeof value === "number") {
+      if (Number.isNaN(value) || !Number.isFinite(value)) {
+        throw new Error(`Audit metadata value for ${key} must be a finite number`);
       }
+      sanitized[key] = value;
+    } else if (typeof value === "boolean") {
+      sanitized[key] = value;
+    } else {
+      // objects, arrays, null, undefined, functions, symbols, bigint
+      throw new Error(`Audit metadata value for ${key} must be a string, finite number or boolean`);
     }
   }
   const sequence = input.sequence ?? 0;
   if (!Number.isInteger(sequence) || sequence < 0) {
     throw new Error(`Invalid audit event sequence: ${String(input.sequence)}`);
   }
+  // Deterministic id bound to the logical event AND a stable digest of the
+  // key-sorted metadata: same event + same metadata => same eventId, key
+  // order never matters, different metadata => different eventId. The digest
+  // never embeds raw values and the eventId is not an auth credential.
+  const canonical = JSON.stringify(
+    Object.keys(sanitized)
+      .sort()
+      .map((k) => [k, sanitized[k]])
+  );
+  const digest = stableFingerprint(canonical);
   return AuditEventSchema.parse({
-    eventId: `${input.operationId}:${input.eventType}:${sequence}`,
+    eventId: `${input.operationId}:${input.eventType}:${sequence}:${digest}`,
     operationId: input.operationId,
     eventType: input.eventType,
     timestamp: input.timestamp,
-    safeMetadata: metadata,
+    safeMetadata: sanitized,
   });
 }

@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { AuditEvent, createAuditEvent } from "./audit";
+import { isValidCalendarDate } from "./types";
 import { createEmptyUsage, DailyRunBudget, DailyRunBudgetSchema, BudgetUsage } from "./budget";
 import { DEFAULT_AGENT_ROLES, validateAgentPanel } from "./roles";
 import {
@@ -18,7 +19,10 @@ import {
 
 export const DailyRunInputSchema = z
   .object({
-    runDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "runDate must be YYYY-MM-DD"),
+    runDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "runDate must be YYYY-MM-DD")
+      .refine(isValidCalendarDate, "runDate must be a real calendar date (leap years respected, no 2026-02-30)"),
     candidateTopics: z.array(CandidateTopicSchema).min(1),
     /** Fingerprints of past, published AND currently-in-review topics. */
     previousTopicFingerprints: z.array(z.string()),

@@ -7,45 +7,67 @@
 
 ---
 
-## 1. 当前状态声明(必读)
+## 1. 能力边界声明(必读)
 
-本模块是 **无数据库原型**,不是生产能力:
+本模块是**无数据库原型地基**,不是生产系统。下面两张清单是本模块能力的唯一权威描述。
 
-- **无数据库**:不含任何 Prisma Schema、migration 或数据库表;所有持久化能力仅以接口表达。
-- **不调用真实 AI**:不接入 DeepSeek、AIHubMix、OpenAI 或任何 Provider;智能体行为仅以角色、状态与校验规则建模。
-- **不是真实 Cron**:没有 Vercel Cron 或后台 Job;"每日运行"由 `planDailyRun` 纯函数表达,由未来调度系统触发。
-- **不能公开发布**:发布路径终止于 `PublicationPlan` 计划对象,不写数据库、不渲染页面。
-- **Evidence 检索尚未接入**:证据来源通过 `EvidenceSource` Schema 由未来证据服务提供;当前不做真实网络搜索或医学数据库查询。
-- **医生资质认证尚未实现**:`approvedByReviewerId` 只是未来外部审核系统提供的不透明标识,本轮不实现医生账号或后台。
-- **公开论坛治理尚未实现**:评论/点赞仅作为修订信号建模。
-- **数据模型和 migration 必须单独审核**:未来落库的数据模型不属于本轮交付,须另行提交审核。
+### 已实现(仅限以下内容)
+
+- 无数据库的领域逻辑(纯 TypeScript + Zod,单进程内运行)
+- 单进程内存 `RunClaimStore`(仅测试/原型用)
+- 每日运行状态机(16 正常态 + 8 异常/阻断态,非法转换显式失败)
+- **规则级**选题过滤(隐私/高风险文本模式匹配 + 风险等级 + 类目范围)
+- EvidenceSource **结构**验证(含真实日历日期、http(s)/DOI 结构校验)
+- EvidenceClaim **结构**绑定(关键 Claim 必须绑定已核验、未撤稿、无 ID 歧义的证据;空 Claim 集合 fail-closed)
+- AI 共识草稿解析后由可信代码固定为 `pending`(AI 输入不能携带任何审核/发布状态字段)
+- 独立的受信任 `MedicalReviewDecision` 结构与版本绑定的发布门禁(`evaluatePublicationGate`)
+- `PublicationPlan` 计划对象生成(幂等键绑定内容 ID + 版本 + 语言集合 + 发布目标集合 + 身份摘要)
+- 多语言传播素材的 **Claim ID 结构一致性**(集合严格相等、安全警告完整保留、生命周期同步撤回)
+- 预算、失败重试、审计事件(严格 allowlist + 敏感模式拒绝 + 确定性 eventId)与修订触发的结构逻辑
+
+### 未实现(明确不存在的能力)
+
+- 数据库唯一约束、跨进程并发控制、lease/fencing
+- Cron / 后台任务 / 任何真实调度
+- AI Provider 接入(不调用 DeepSeek、AIHubMix、OpenAI 或任何模型)
+- 真实证据检索;DOI/PMID 在线核验;引用与 Claim 的**语义**核验
+- 翻译**语义等价**验证(仅结构级 Claim ID 一致性)
+- 生产级 PHI/个人健康信息识别(仅规则级文本模式,存在漏检与误检)
+- 生产级高风险医学内容分类器(仅规则级模式匹配)
+- 医生身份、资质认证、审核后台、医生账号
+- API 路由、真实发布、页面渲染、论坛治理
+- HIPAA / FDA 或任何法规合规认证
+
+**禁止的误导表述**(本文档及衍生材料不得声称):生产可用、HIPAA 合规、FDA 合规、临床验证、全自动发布、医生已验证、语义级核验、完整 PII 检测。
 
 ## 2. 核心安全不变量
 
-1. **医生审核为强制发布门禁**:`evaluatePublicationGate` 要求 `medicalReviewStatus === "approved"` 且全部检查(关键 Claim 核验、无高风险内容、隐私、证据、审计、版本不可变)通过,任何一项失败都不能生成 `PublicationPlan`。高风险医学内容**没有任何绕过路径**。
-2. **智能体共识不等于科学共识**:每份循证共识草稿的 `limitations` 必须包含免责声明「智能体一致意见不等于科学共识。」,否则 Schema 拒绝。
-3. **禁止个体医疗输出**:共识草稿出现 `diagnosis / prescription / medicationDose / stopMedication / diseaseProbability / guaranteedOutcome / patientSpecificTreatment` 字段即拒绝;传播素材出现诊断、处方、剂量或疗效承诺文案即拒绝。
-4. **患者个体问题永远不能变成论坛议题**:选题策略拒绝可识别患者资料、个体诊断/剂量/停药/概率/保证治愈类议题。
+1. **医生审核为强制发布门禁**:`evaluatePublicationGate` 要求审核状态为 `approved`、生命周期为 `active`、`contentVersion === approvedContentVersion`(新版本永不继承旧批准)、审核人 ID 结构合法,且关键 Claim 核验/无高风险内容/隐私/证据/审计/版本不可变全部通过。任何一项失败都不能生成 `PublicationPlan`;`createPublicationPlan` 自行重跑完整门禁,不信任调用方。高风险内容、withdrawn、superseded **没有任何绕过路径**。
+2. **AI 不能自我批准**:AI 草稿输入 Schema 严格禁止 `medicalReviewStatus / reviewerId / reviewedAt / approval / publicationStatus / publishedAt / withdrawn / superseded` 字段;解析成功后由可信代码固定 `pending`;状态变更唯一入口是外部 `MedicalReviewDecision`,且必须精确匹配内容版本。
+3. **智能体共识不等于科学共识**:每份草稿的 `limitations` 必须包含免责声明「智能体一致意见不等于科学共识。」。
+4. **禁止个体医疗输出**:草稿出现 `diagnosis / prescription / medicationDose / stopMedication / diseaseProbability / guaranteedOutcome / patientSpecificTreatment` 即拒绝;传播素材出现诊断、处方、剂量或疗效承诺文案即拒绝。
+5. **患者个体问题永远不能变成论坛议题**:统一规范化(NFKC、小写、零宽剥离、空白/标点折叠)后进行隐私与高风险匹配;`containsPatientData=false` 与 `riskLevel=low` 都不能覆盖文本检测;`riskLevel=high` 永远阻断;严重度取最严格:privacy > high_risk > duplicate > planned。**这只是规则级防线,不是生产级 PHI 或医疗安全分类器。**
+6. **审核人 ID 只是不透明标识**:trim 后非空、限长、禁控制字符,但**不是**医生资质已验证的证明。
 
 ## 3. 模块结构(`lib/roundtable/v1/`)
 
 | 文件 | 职责 |
 | --- | --- |
-| `types.ts` | 模块名称常量、运行模式、稳定指纹与标题标准化 |
-| `states.ts` | 每日运行状态机(16 正常态 + 8 异常/阻断态),非法转换显式抛错 |
-| `roles.ts` | 5 个默认智能体角色 + 可选角色;五角色齐全/去重/Evidence+Safety 强制校验;单 Agent 失败不得声称完整共识 |
-| `topic-policy.ts` | 候选议题 Schema、安全策略(隐私/高风险/无证据/超范围)、优先类目、确定性选题打分、标准化指纹去重 |
-| `daily-run.ts` | 每日运行规划器:一天一议题、operationId 幂等、`RunClaimStore` 接口 + 内存测试替身 |
-| `budget.ts` | 六维预算 Schema、`evaluateBudget` / `recordBudgetUsage`,拒绝 NaN/Infinity/负数 |
-| `retry.ts` | 可重试/不可重试错误分类,重试复用 operationId 并计入预算 |
-| `evidence.ts` | `EvidenceSource` 严格 Schema;URL/DOI 存在 ≠ 已核验 |
-| `claims.ts` | `EvidenceClaim` 严格 Schema;关键 Claim 绑定证据的审核前置校验 |
-| `consensus.ts` | 循证共识草稿(Evidence Consensus Draft)Schema、免责声明、禁止字段显式拒绝 |
-| `review-gate.ts` | `evaluatePublicationGate` 医生审核发布门禁 |
-| `publication.ts` | `PublicationPlan` 生成与发布幂等键(同版本同键) |
-| `distribution.ts` | 中英文传播素材草稿:继承版本/审核/撤回状态,翻译不得新增医学结论,一语言撤回全语言撤回 |
-| `monitoring.ts` | `evaluateRevisionTriggers` 修订触发 + 新版本计划(旧版本不可变、新版本重新审核) |
-| `audit.ts` | 审计事件:严格 `safeMetadata` allowlist,拒绝疑似密钥/邮箱/连接串,确定性 eventId |
+| `types.ts` | 模块常量、共享枚举(审核状态/生命周期)、稳定指纹、统一文本规范化、真实日历日期校验 |
+| `states.ts` | 每日运行状态机,非法转换显式抛错 |
+| `roles.ts` | 5 默认智能体角色 + 可选角色;五角色/去重/Evidence+Safety 强制校验 |
+| `topic-policy.ts` | 候选议题 Schema(标题长度/控制字符/纯标点拒绝)、隐私与高风险文本策略、指纹一致性(伪造 duplicateFingerprint 直接拒绝)、确定性选题 |
+| `daily-run.ts` | 每日运行规划器:真实日历日期、一天一议题、operationId 幂等、`RunClaimStore` 接口 |
+| `budget.ts` | 六维预算,拒绝 NaN/Infinity/负数 |
+| `retry.ts` | 可重试/不可重试分类,重试复用 operationId 并计入预算 |
+| `evidence.ts` | `EvidenceSource` 严格 Schema(真实日期、http(s)/DOI 结构校验);URL/DOI 存在 ≠ 已核验 |
+| `claims.ts` | `EvidenceClaim` 严格 Schema;空集合 fail-closed;重复/大小写歧义 ID 拒绝;审核前置校验 |
+| `consensus.ts` | AI 草稿信任边界(禁审核字段、固定 pending)、`applyMedicalReviewDecision` 版本绑定状态变更 |
+| `review-gate.ts` | `ReviewerIdSchema`、受信任 `MedicalReviewDecision`、生命周期+版本绑定的发布门禁 |
+| `publication.ts` | `PublicationPlan`;幂等键绑定 操作ID+版本+语言集合+目标集合+摘要,集合有序化去重 |
+| `distribution.ts` | 多语言素材:默认 pending、源绑定、Claim ID 集合严格一致、冻结对象、生命周期全语言同步 |
+| `monitoring.ts` | 修订触发 + 新版本计划(旧版本不可变、新版本重新 pending) |
+| `audit.ts` | 审计事件:键 allowlist + 禁止键干,值限枚举/短ID/数字/布尔,敏感模式拒绝,eventId 绑定排序 metadata 摘要 |
 | `index.ts` | 聚合导出 |
 
 ## 4. 每日运行状态机
@@ -62,34 +84,32 @@ scheduled → topic_selected → safety_precheck → agents_assigned
 
 异常/阻断:`duplicate_blocked` `privacy_blocked` `high_risk_blocked` `budget_exceeded` `provider_failed` `evidence_invalid` `review_rejected` `cancelled`。
 
-关键强制规则(均有测试):只有 `scheduled` 可进 `topic_selected`;`published` 只能来自 `approved`;`awaiting_medical_review`/`review_rejected` 不能直达 `published`;`evidence_invalid` 无法进入审核;`superseded` 不可恢复;`cancelled`/`privacy_blocked`/`high_risk_blocked`/`duplicate_blocked` 为终止态;`provider_failed` 是唯一可重试的阻断态。
+关键强制规则(均有测试):只有 `scheduled` 可进 `topic_selected`;`published` 只能来自 `approved`;`awaiting_medical_review`/`review_rejected` 不能直达 `published`;`evidence_invalid` 无法进入审核;`superseded` 不可恢复;终止态不可离开;`provider_failed` 是唯一可重试的阻断态。
 
 ## 5. 幂等与并发(未来生产要求)
 
-- `operationId = roundtable:{YYYY-MM-DD}:{topicFingerprint}:v1`,由运行日期 + 标准化标题指纹确定性生成,不含患者信息,不作为权限凭证。
-- 同一天同一议题永远得到同一 operationId;重试复用同一 operation,不会创建第二个 Discussion。
-- `RunClaimStore` 是并发唯一性的接口边界。**本轮未实现生产分布式锁;内存 Map 实现(`InMemoryRunClaimStore`)不能保证跨进程/跨实例的并发安全,仅供测试。** 未来生产实现必须由:
-  1. 数据库对运行日期的**唯一约束**;
-  2. 带过期时间的 **lease**;
-  3. 每次写入校验的单调 **fencing token**
-  共同保证同日仅有一次执行。
+- `operationId = roundtable:{YYYY-MM-DD}:{topicFingerprint}:v1`,运行日期为真实日历日期,指纹由标准化标题重算;不含患者信息,不作权限凭证。
+- 调用方提供的 `duplicateFingerprint` 必须与系统重算一致,否则该议题直接拒绝——伪造指纹不是去重绕过入口。
+- 同日同议题同 operationId;重试复用 operation,不创建第二个 Discussion。
+- 发布幂等键:`publish:{operationId}:v{version}:{语言集合}:{目标集合}:{身份摘要}`,语言/目标排序去重后入键;不同语言、不同目标、不同版本永不同键。
+- `RunClaimStore` 是并发唯一性的接口边界。**本轮未实现生产分布式锁;`InMemoryRunClaimStore` 不能保证跨进程/跨实例的并发安全,仅供测试。** 未来生产实现必须由:(1) 数据库对运行日期的唯一约束;(2) 带过期时间的 lease;(3) 每次写入校验的单调 fencing token 共同保证同日仅一次执行。
 
 ## 6. 预算与失败重试
 
-- 六维上限:`maximumAgentCalls / maximumEvidenceQueries / maximumTokens / maximumRetries / maximumTranslationLanguages / maximumRuntimeMs`;任何上限突破即进入 `budget_exceeded`,不产生伪完成结果。
-- 重试、翻译、Evidence 查询全部计入预算;NaN/Infinity/负数在 Schema 与记账两层都被拒绝。
+- 六维上限;任何突破即 `budget_exceeded`,不产生伪完成结果;重试/翻译/Evidence 查询全部计入预算;NaN/Infinity/负数双层拒绝。
 - 可重试:`provider_timeout / temporary_provider_error / temporary_evidence_service_error`;不可重试:`privacy_blocked / high_risk_blocked / evidence_invalid / medical_review_rejected / budget_exceeded / schema_invalid`;未知错误默认不可重试。
 
-## 7. 证据与共识
+## 7. 证据、共识与多语言
 
-- 关键 Claim(`confirmed_fact / current_consensus / safety_warning`)必须绑定已核验、未撤稿的 EvidenceSource;来源缺失、未核验、撤稿、过期无说明的 Claim 集合不得进入医生审核。
-- 修订触发:新高质量证据、来源撤稿、专家重大纠错、重大安全报告、指南更新、内容过期;普通点赞/评论只是审核信号,不能直接变成 Evidence,也不触发修订。
-- 已发布版本不可变;修订生成 `version + 1` 的新版本并重新进入医生审核,旧版本标记 `superseded`。
+- 关键 Claim(`confirmed_fact / current_consensus / safety_warning`)必须绑定存在、已核验、未撤稿、无 ID 歧义的 EvidenceSource;空 Claim 集合永不 ready;Evidence ID 重复(含仅大小写差异)整体拒绝;引用为 trim 后精确匹配。
+- 多语言素材与源共识绑定(`sourceConsensusId/sourceVersion/sourceClaimIds/sourceSafetyWarningClaimIds`);`translatedClaimIds` 必须与源集合严格相等(不增、不删、不重复,安全警告完整保留);对象冻结防篡改。**仅保证结构级完整性,不保证语义等价。**
+- 原文 withdrawn/superseded 同步全部语言;任一语言撤回则全语言撤回;素材默认 `pending`,无外部审核决策不能 approved/published。
+- 修订触发:新高质量证据、来源撤稿、专家重大纠错、重大安全报告、指南更新、内容过期;普通点赞/评论永不触发;旧版本不可变,新版本重新 pending。
 
 ## 8. 审计
 
-事件覆盖从 `run_scheduled` 到 `budget_exceeded` 的全生命周期;`safeMetadata` 采用严格 allowlist,禁止记录 Prompt 原文、思维过程、患者健康原文、email、明文 userId、Cookie/Token/API Key、Provider 请求响应体及真实病例身份信息;疑似敏感值直接抛错。
+`safeMetadata` 键采用严格 allowlist + 禁止键干(name/email/phone/MRN/prompt/token/secret 等变体);值仅允许受限短字符串(NFKC、trim、限长、禁控制/零宽字符、禁长自然语言与 CJK 长文、禁 JSON 字符串)、有限数字与布尔;拒绝邮箱(含 Unicode 变体)、电话、MRN、Bearer/JWT、API key、URL 敏感查询参数等模式。`eventId = {operationId}:{eventType}:{sequence}:{排序metadata摘要}`——相同逻辑事件与 metadata 得到相同 ID,键顺序无关,不含原文,不作鉴权凭证。禁止记录 Prompt 原文、思维过程、患者健康原文、email、明文 userId、Cookie/Token/API Key、Provider 请求响应体及真实病例身份信息。
 
 ## 9. 测试
 
-`tests/medical-roundtable-v1.test.mjs`(51 个用例)将 `lib/roundtable/v1` 的真实 TS 源码编译到 git 忽略的临时目录后 require 执行——无镜像逻辑、无复制 Schema/状态表、无源码字符串断言;`test.after` 自动清理临时目录。
+`tests/medical-roundtable-v1.test.mjs`(64 个用例)将 `lib/roundtable/v1` 的真实 TS 源码编译到 git 忽略的随机临时目录后 require 执行——无镜像逻辑、无复制 Schema/状态表/正则/算法、无源码字符串断言;编译失败与运行结束均清理临时目录。
