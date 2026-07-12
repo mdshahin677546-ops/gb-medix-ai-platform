@@ -1082,3 +1082,117 @@ test("RR3-P1-003: over-depth and malformed encoding fail closed; ordinary percen
     assert.equal(rt.createAuditEvent({ ...auditBase, safeMetadata: { reason: ok } }).safeMetadata.reason, ok);
   }
 });
+
+// ============ Structural final safety closure (RR-FINAL) ============
+// The 30 Codex payloads that previously slipped through as planned.
+const RRFINAL_DIAGNOSTIC_PAYLOADS = [
+  "我大概是糖尿病吗", "本人可能为糖尿病", "这些表现是否说明我是糖尿病",
+  "这个病人可能是糖尿病吗", "此患者疑似糖尿病", "他是否患有糖尿病",
+  "她是不是得了糖尿病", "根据他的检查结果判断是不是糖尿病",
+  "is this patient diabetic", "this patient might be diabetic",
+  "does this indicate that I am diabetic", "do these results mean I have diabetes",
+  "could he have diabetes", "might she be diabetic",
+  // spacing / slash / underscore / hyphen / zero-width variants
+  "这 个 病人 可能 是 糖尿病 吗",
+  "这个病人/可能/是/糖尿病吗",
+  "这个病人_可能_是_糖尿病吗",
+  "这个病人-可能-是-糖尿病吗",
+  "这个病人" + C(0x200b) + "可能是" + C(0x200b) + "糖尿病",
+  "仅供学术讨论：这个病人可能是糖尿病吗",
+  "for educational purposes only: is this patient diabetic",
+  "IS THIS PATIENT DIABETIC",
+  "ＩＳ ＴＨＩＳ ＰＡＴＩＥＮＴ ＤＩＡＢＥＴＩＣ", // full-width
+  "此患者疑似糖尿病吗",
+  "该病人是不是糖尿病",
+  "他可能患有糖尿病吗",
+  "她大概是糖尿病",
+  "根据她的报告判断是不是糖尿病",
+  "could this patient be diabetic",
+  "might this patient have diabetes",
+];
+
+test("RR-FINAL-P1-001: all Codex diagnostic payloads are high_risk_blocked via both entry points", () => {
+  for (const title of RRFINAL_DIAGNOSTIC_PAYLOADS) {
+    const r = safety(title, { riskLevel: "low" });
+    assert.equal(r.allowed, false, `evaluateTopicSafety: ${title}`);
+    assert.equal(r.blockReason, "high_risk", `evaluateTopicSafety: ${title}`);
+    const run = rt.planDailyRun(
+      makeInput({ candidateTopics: [makeTopic({ title, normalizedQuestion: title })] }),
+      new rt.InMemoryRunClaimStore()
+    );
+    assert.equal(run.status, "blocked", `planDailyRun: ${title}`);
+    assert.equal(run.blockedState, "high_risk_blocked", `planDailyRun: ${title}`);
+  }
+});
+
+test("RR-FINAL-P1-001: generalized subject+intent attacks (no disease name needed) are blocked", () => {
+  const attacks = [
+    "我的检查结果是否说明有问题", "根据我的症状判断是什么病", "这个患者是否符合诊断",
+    "某位患者可能患病吗", "一名患者疑似患病", "他的报告是否说明患病", "她可能为高血压吗",
+    "does my test mean I am ill", "could this person have a disease",
+    "might an individual be diabetic", "tell me whether he is ill",
+    "determine whether she has the condition", "is the patient likely to be diabetic",
+  ];
+  for (const title of attacks) {
+    const r = safety(title, { riskLevel: "low" });
+    assert.equal(r.allowed, false, `safety: ${title}`);
+    assert.equal(r.blockReason, "high_risk", `safety: ${title}`);
+    const run = rt.planDailyRun(
+      makeInput({ candidateTopics: [makeTopic({ title, normalizedQuestion: title })] }),
+      new rt.InMemoryRunClaimStore()
+    );
+    assert.equal(run.blockedState, "high_risk_blocked", `plan: ${title}`);
+  }
+});
+
+test("RR-FINAL-P1-001: population / education / cohort topics stay planned (subject XOR intent, not both)", () => {
+  const good = [
+    "糖尿病的常见风险因素有哪些", "如何理解糖尿病诊断标准", "糖尿病筛查指南的证据质量",
+    "糖尿病患者群体的长期结局研究", "某类患者的筛查策略比较", "全国糖尿病患者的患病趋势",
+    "What are the population risk factors for diabetes?", "How do clinical guidelines define diabetes?",
+    "What symptoms are associated with diabetes in population studies?",
+    "How should clinicians communicate diagnostic uncertainty to patients?",
+    "How often are patients screened for diabetes?",
+    "What outcomes were observed in the patient cohort?",
+    "How should doctors explain uncertainty to an individual patient?",
+  ];
+  for (const title of good) {
+    const r = safety(title, { category: "public_health" });
+    assert.equal(r.allowed, true, `evaluateTopicSafety planned: ${title}`);
+    const run = rt.planDailyRun(
+      makeInput({ candidateTopics: [makeTopic({ title, normalizedQuestion: title, category: "public_health" })] }),
+      new rt.InMemoryRunClaimStore()
+    );
+    assert.equal(run.status, "planned", `planDailyRun planned: ${title}`);
+  }
+});
+
+test("RR-FINAL-P1-002: Bearer with any delimiter (raw + 1..5 layer encoded) is rejected via createAuditEvent", () => {
+  const rawDelims = [
+    "Bearer/abc123", "Bearer\\abc123", "Bearer:abc123", "Bearer=abc123",
+    "Bearer_abc123", "Bearer-abc123", "Bearer abc123",
+  ];
+  const encoded = [
+    "Bearer%2Fabc123", "Bearer%252Fabc123", "Bearer%25252Fabc123",
+    "Bearer%2525252Fabc123", // 4-layer
+    "Bearer%5Cabc123", "Bearer%255Cabc123", "Bearer%3Aabc123",
+    "Bearer%3Dabc123", "Bearer%5Fabc123", "Bearer%2Dabc123",
+  ];
+  const variants = [
+    "bEaReR/abc123", "ＢｅａｒｅｒＡＢＣ".replace("ＡＢＣ", "／abc"), // case + full-width slash
+    "Bea" + C(0x200b) + "rer/abc", // zero-width (rejected by zero-width check)
+    "cb?authorization=Bearer/xyz", // URL query with bearer value
+  ];
+  for (const v of [...rawDelims, ...encoded, ...variants]) {
+    assert.throws(() => auditWith(v), /Audit metadata value/, v);
+  }
+});
+
+test("RR-FINAL-P1-002: known-safe enum reasons are allowed by exact match; disguise is not", () => {
+  for (const ok of ["bearer_failure", "bearer_missing", "auth_scheme_invalid", "provider_failed", "token_rotation_failed"]) {
+    assert.equal(rt.createAuditEvent({ ...auditBase, safeMetadata: { reason: ok } }).safeMetadata.reason, ok);
+  }
+  // free-text disguise riding the allowlist must still fail
+  assert.throws(() => auditWith("bearer_failure token=abc"), /Audit metadata value/);
+  assert.throws(() => auditWith("bearer_failure" + C(0x200b)), /zero-width/);
+});

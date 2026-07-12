@@ -102,13 +102,17 @@ const DIGIT_RUN_EXEMPT_KEYS = new Set(["topicFingerprint", "publicationIdempoten
 const FORBIDDEN_VALUE_PATTERNS: RegExp[] = [
   /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/, // email (post-NFKC)
   /\(at\)|＠/i, // obfuscated @ (after NFKC ＠ folds to @, kept as belt & braces)
-  /Bearer\s+/i,
+  // Bearer scheme followed by ANY common delimiter — whitespace, colon,
+  // forward/back slash, equals, underscore or hyphen (RR-FINAL-P1-002).
+  // Encoded delimiters (%2F, %5C, %3A, …, at any nesting depth) are decoded
+  // to these forms by the bounded decode loop before this scan runs.
+  /bearer[\s:/\\=_-]/i,
   /\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{4,}\./, // JWT shape
   /sk-[A-Za-z0-9]/,
   /(api[_-]?key|secret|passwd|password|cookie|authorization)/i,
   /(access|refresh|session|auth)[_-]?token/i, // accessToken / refresh_token / … (case folded)
   /token\s*[=:]/i, // token assignment in any form
-  /%(25)*(40|3d|20|5f|2d)/i, // percent-encoded @ = space _ - markers at any nesting depth
+  /%(25)*(40|3d|20|5f|2d|2f|5c|3a)/i, // percent-encoded @ = space _ - / \ : markers at any nesting depth
   /[?&](token|key|secret|password|auth|session|sig)=/i, // sensitive URL query params
   /postgres(ql)?:\/\//i,
   /(mrn|medical\s*record|病历号|病案号|病历编号)/i,
@@ -195,6 +199,21 @@ function checkStringVariant(key: string, variant: string): void {
   }
 }
 
+// Strict, EXACT-match allowlist of known-safe enum reason strings that would
+// otherwise trip the (deliberately broad) Bearer/token heuristics —
+// e.g. "bearer_failure" contains "bearer_". Matching is exact on the
+// NFKC+trim+lowercased whole value, so free-text disguise
+// ("bearer_failure token=abc" is two tokens, never equal to an entry) can
+// never ride this allowlist; any injected zero-width/control character also
+// breaks the exact match and falls through to full scanning.
+const SAFE_ENUM_VALUES = new Set([
+  "bearer_failure",
+  "bearer_missing",
+  "auth_scheme_invalid",
+  "provider_failed",
+  "token_rotation_failed",
+]);
+
 function assertSafeMetadataString(key: string, value: string): string {
   const normalized = value.normalize("NFKC").trim();
   if (normalized.length === 0) {
@@ -202,6 +221,12 @@ function assertSafeMetadataString(key: string, value: string): string {
   }
   if (normalized.length > AUDIT_METADATA_VALUE_MAX_LENGTH) {
     throw new Error(`Audit metadata value for ${key} exceeds ${AUDIT_METADATA_VALUE_MAX_LENGTH} characters`);
+  }
+  // Known-safe enumerated reasons bypass the sensitive-pattern scan by EXACT
+  // match only (never substring) — this resolves the safe-reason vs.
+  // Bearer/token-heuristic conflict without allowing free-text disguise.
+  if (SAFE_ENUM_VALUES.has(normalized.toLowerCase())) {
+    return normalized;
   }
   // Every check runs on the raw value AND its percent-decoded variants —
   // encoding is never a way around the scan.

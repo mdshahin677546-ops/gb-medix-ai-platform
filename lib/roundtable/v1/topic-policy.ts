@@ -169,6 +169,100 @@ const HIGH_RISK_COMPACT_PATTERNS: RegExp[] = [
   /(suicid|selfharm|killmyself|endmylife|hurtmyself)/,
 ];
 
+// ---- STRUCTURAL first-phase safety gate (RR-FINAL-P1-001) ----------------
+//
+// The medical roundtable only auto-selects population-level / public-health /
+// guideline / evidence / mechanism / education topics. Any individual or
+// single-patient diagnostic-judgment context is out of scope. Rather than
+// chasing one sentence at a time, we detect two INDEPENDENT signal families
+// and fail closed the moment BOTH co-occur:
+//
+//   individualSubjectSignal  AND  medicalStatusOrDiagnosticIntent
+//     -> high_risk_blocked
+//
+// This is a deliberately CONSERVATIVE first-phase rule that tolerates some
+// false positives; it needs no disease dictionary and does not depend on
+// recognizing a specific condition name. All detectors are small, bounded
+// and composable — no unbounded or catastrophically-backtracking regex.
+
+// Individual / single-patient subject signals (checked on `compact`, i.e.
+// zero-width stripped + whitespace/punctuation removed, so spacing/slash/
+// underscore/hyphen/zero-width evasion collapses first). Group / population
+// phrasing (患者群体, 某类患者, 全国…患者, 我们, 他们) is intentionally NOT
+// matched here. 他/她 exclude common non-pronoun uses (其他, 他汀/statins,
+// 他人/他们, 她们).
+const INDIVIDUAL_SUBJECT_CJK: RegExp[] = [
+  /本人/,
+  /我(?!们|国|省|市|县|院|校)/,
+  /(这个|该|此)(病人|患者)/,
+  /(某位|某个|一位|一名)(病人|患者)/,
+  /(病人|患者)本人/,
+  /这个人(?!群|口|们)/,
+  /(?<!其)[他她](?!们|人|汀)/,
+];
+
+// Individual English subjects (checked on `normalized`, which keeps single
+// spaces so word boundaries work — avoids "the" matching bare "he"). Plural
+// "patients" / "individuals" / "people" are NOT individual subjects.
+const INDIVIDUAL_SUBJECT_EN: RegExp[] = [
+  /\b(i|me|my|myself|he|she|his|her)\b/,
+  /\bthis patient\b/,
+  /\bthe patient\b/,
+  /\ba patient\b/,
+  /\ban individual\b/,
+  /\bindividual patient\b/,
+  /\bthis person\b/,
+];
+
+// Medical-status / diagnostic-judgment intent (checked on `compact`).
+const MEDICAL_INTENT_CJK: RegExp[] = [
+  /(是不是|是否是|是否为|是否患有|是否符合诊断|会不会是|有没有可能是|可能是|大概是|可能为|可能患有|像是)/,
+  /(罹患|患有|得了|患了|患病|疑似|确诊|排除|符合诊断)/,
+  /诊断/,
+  /(表现|检查结果|化验结果|报告|化验|症状|指标)(是否|说明|判断|意味|表明)/,
+  /(判断|确定|告诉我|确认).{0,4}(是不是|是否|患|得了|有没有|什么病|啥病|符合)/,
+  /判断是(什么|啥)?病/,
+  /(患病|患|得).{0,3}(概率|几率|可能性)/,
+  /(风险|概率|几率)(百分比|多大|多少)/,
+  /患病概率/,
+];
+
+// Medical-status / diagnostic-judgment intent (checked on `normalized`).
+// NOTE: /diagnos(e|is|ed)/ deliberately does NOT match "diagnostic", so
+// "diagnostic uncertainty" education topics are not treated as intent.
+const MEDICAL_INTENT_EN: RegExp[] = [
+  /\bam i\b/,
+  /\bis (he|she|it|this patient|the patient|an? patient)\b/,
+  /\b(might|could|may|would|will)\b( \w+){0,3} \b(be|have|has)\b/,
+  /\blikely to (be|have)\b/,
+  /\bdoes this (mean|indicate)\b/,
+  /\bdo these results mean\b/,
+  /\bdo(es)?\b( \w+){0,4} \bmean\b/,
+  /\bindicate(s)? that\b/,
+  /\bmeans? that\b/,
+  /\bdetermine (whether|if)\b/,
+  /\btell me (whether|if)\b/,
+  /\bwhether\b( \w+){0,4} \b(have|has|is|am|be)\b/,
+  /\bdiagnos(e|is|ed)\b/,
+  /\brule out\b/,
+  /\bprobability\b/,
+  /\bpercentage risk\b/,
+];
+
+function hasIndividualSubjectSignal(normalized: string, compact: string): boolean {
+  return (
+    INDIVIDUAL_SUBJECT_CJK.some((re) => re.test(compact)) ||
+    INDIVIDUAL_SUBJECT_EN.some((re) => re.test(normalized))
+  );
+}
+
+function hasMedicalDiagnosticIntent(normalized: string, compact: string): boolean {
+  return (
+    MEDICAL_INTENT_CJK.some((re) => re.test(compact)) ||
+    MEDICAL_INTENT_EN.some((re) => re.test(normalized))
+  );
+}
+
 // Minimum evidence availability below which a topic is treated as having no
 // verifiable evidence base.
 export const MINIMUM_EVIDENCE_AVAILABILITY = 0.2;
@@ -206,6 +300,17 @@ export function evaluateTopicSafety(topic: CandidateTopic): TopicSafetyResult {
         detail: "individual-case medical request cannot become a roundtable topic",
       };
     }
+  }
+  // Structural gate: an individual/single-patient subject combined with a
+  // medical-status or diagnostic-judgment intent is never an eligible
+  // auto-selected topic (conservative first-phase rule; some false positives
+  // accepted). Needs no disease name to fire.
+  if (hasIndividualSubjectSignal(normalized, compact) && hasMedicalDiagnosticIntent(normalized, compact)) {
+    return {
+      allowed: false,
+      blockReason: "high_risk",
+      detail: "individual/single-patient diagnostic-judgment context cannot become a roundtable topic",
+    };
   }
   if (topic.riskLevel === "high") {
     return { allowed: false, blockReason: "high_risk", detail: "topic risk level is high" };
