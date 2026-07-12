@@ -10,6 +10,19 @@ import { z } from "zod";
 export const opaqueIdSchema = z.string().min(1).max(128);
 export type OpaqueId = z.infer<typeof opaqueIdSchema>;
 
+/**
+ * Strict opaque id for untrusted route inputs (e.g. a report id in the path).
+ * Tighter than `opaqueIdSchema`: only safe id characters (A-Z a-z 0-9 _ -), so
+ * control characters, whitespace, and injection-ish input are rejected BEFORE
+ * any database query. An id is never treated as proof of ownership.
+ */
+export const routeIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/);
+export type RouteId = z.infer<typeof routeIdSchema>;
+
 /** De-identified request identifier for correlating a single request in logs. */
 export const requestIdSchema = z.string().min(1).max(128);
 

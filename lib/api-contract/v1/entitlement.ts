@@ -43,3 +43,16 @@ export const entitlementSchema = z
   })
   .strict();
 export type Entitlement = z.infer<typeof entitlementSchema>;
+
+/**
+ * Paginated entitlement list response (batch 2.1, additive — does NOT change
+ * `entitlementSchema`). `nextCursor` is an opaque pagination token or null; the
+ * list is always scoped server-side to the authenticated user.
+ */
+export const entitlementListResponseSchema = z
+  .object({
+    entitlements: z.array(entitlementSchema),
+    nextCursor: z.string().min(1).nullable()
+  })
+  .strict();
+export type EntitlementListResponse = z.infer<typeof entitlementListResponseSchema>;
