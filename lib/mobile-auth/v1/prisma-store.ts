@@ -3,6 +3,7 @@ import {
   isSessionTimeExpired,
   isSafeTimestamp,
   isSafeCounter,
+  isRevokeReason,
   DB_MAX_ROTATION_COUNTER,
   type DeviceSession,
   type DeviceSessionStatus,
@@ -86,7 +87,10 @@ function mapRow(row: DeviceSessionRow): DeviceSession {
 // ---- Injected Prisma surface (structural; a real PrismaClient satisfies it) ----
 type Tx = {
   $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
-  deviceSession: { update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<DeviceSessionRow> };
+  deviceSession: {
+    create: (args: { data: Record<string, unknown> }) => Promise<DeviceSessionRow>;
+    update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<DeviceSessionRow>;
+  };
   consumedRefreshToken: { create: (args: { data: Record<string, unknown> }) => Promise<unknown> };
 };
 export type MobileAuthPrisma = {
@@ -116,17 +120,29 @@ function isUniqueViolation(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "P2002");
 }
 
+/**
+ * A loaded row is only trusted after full validation: 64-hex hash + all structural
+ * invariants (times, counter, status, relations, revokeReason allowlist,
+ * active-implies-no-revocation). A corrupt row fails closed (fixed error, no leak).
+ */
+function assertValidRow(session: DeviceSession): DeviceSession {
+  if (!HEX64.test(session.refreshTokenHash) || !hasValidSessionInvariants(session)) {
+    throw new DeviceSessionInvariantError();
+  }
+  return session;
+}
+
 export class PrismaDeviceSessionStore implements DeviceSessionStore {
   constructor(private readonly prisma: MobileAuthPrisma) {}
 
   async findById(id: string): Promise<DeviceSession | null> {
     const row = await this.prisma.deviceSession.findUnique({ where: { id } });
-    return row ? mapRow(row) : null;
+    return row ? assertValidRow(mapRow(row)) : null;
   }
 
   async findByRefreshTokenHash(refreshTokenHash: string): Promise<DeviceSession | null> {
     const row = await this.prisma.deviceSession.findUnique({ where: { refreshTokenHash } });
-    return row ? mapRow(row) : null;
+    return row ? assertValidRow(mapRow(row)) : null;
   }
 
   async createSession(input: CreateSessionInput): Promise<DeviceSession> {
@@ -147,23 +163,31 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
       throw new DeviceSessionInvariantError();
     }
     try {
-      const row = await this.prisma.deviceSession.create({
-        data: {
-          id: input.id,
-          userId: input.userId,
-          tokenFamilyId: input.tokenFamilyId,
-          status: "active",
-          rotationCounter: startCounter,
-          refreshTokenHash: input.refreshTokenHash,
-          createdAt: fromEpochSeconds(input.createdAt),
-          lastUsedAt: fromEpochSeconds(input.createdAt),
-          idleExpiresAt: fromEpochSeconds(input.idleExpiresAt),
-          absoluteExpiresAt: fromEpochSeconds(input.absoluteExpiresAt)
-        }
+      const row = await this.prisma.$transaction(async (tx) => {
+        // Serialize on the hash so a create can never race a rotation onto the
+        // same hash; then confirm the hash is unused in BOTH tables before insert.
+        await tx.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(hashtextextended(${input.refreshTokenHash}, 0::bigint))) _l`;
+        const inCurrent = (await tx.$queryRaw`SELECT 1 FROM "DeviceSession" WHERE "refreshTokenHash" = ${input.refreshTokenHash} LIMIT 1`) as unknown[];
+        const inConsumed = (await tx.$queryRaw`SELECT 1 FROM "ConsumedRefreshToken" WHERE "refreshTokenHash" = ${input.refreshTokenHash} LIMIT 1`) as unknown[];
+        if (inCurrent.length > 0 || inConsumed.length > 0) throw new DeviceSessionInvariantError();
+        return tx.deviceSession.create({
+          data: {
+            id: input.id,
+            userId: input.userId,
+            tokenFamilyId: input.tokenFamilyId,
+            status: "active",
+            rotationCounter: startCounter,
+            refreshTokenHash: input.refreshTokenHash,
+            createdAt: fromEpochSeconds(input.createdAt),
+            lastUsedAt: fromEpochSeconds(input.createdAt),
+            idleExpiresAt: fromEpochSeconds(input.idleExpiresAt),
+            absoluteExpiresAt: fromEpochSeconds(input.absoluteExpiresAt)
+          }
+        });
       });
       return mapRow(row);
     } catch {
-      // Duplicate id / hash, FK miss, or a CHECK backstop — never leak DB detail.
+      // Duplicate id / hash / family, FK miss, or a CHECK backstop — never leak DB detail.
       throw new DeviceSessionInvariantError();
     }
   }
@@ -207,6 +231,14 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
         const newIdle = Math.min(input.newIdleExpiresAt, s.absoluteExpiresAt);
         if (newIdle <= input.now) return { status: "invalid_input" };
 
+        // 5b. Serialize on the NEW hash and reject if it already exists as a
+        //     current or consumed hash anywhere (global exclusivity; a consumed
+        //     hash can never become current again).
+        await tx.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(hashtextextended(${input.newRefreshTokenHash}, 0::bigint))) _l`;
+        const newInCurrent = (await tx.$queryRaw`SELECT 1 FROM "DeviceSession" WHERE "refreshTokenHash" = ${input.newRefreshTokenHash} LIMIT 1`) as unknown[];
+        const newInConsumed = (await tx.$queryRaw`SELECT 1 FROM "ConsumedRefreshToken" WHERE "refreshTokenHash" = ${input.newRefreshTokenHash} LIMIT 1`) as unknown[];
+        if (newInCurrent.length > 0 || newInConsumed.length > 0) return { status: "conflict" };
+
         // 6. Same transaction: persist the old hash to consumed history, then
         //    update the session. Consumed expiresAt is the session's absolute
         //    expiry (never later), keeping replay detection valid until then.
@@ -238,7 +270,7 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
   }
 
   async revokeSession(id: string, reason: RevokeReason, now: number): Promise<void> {
-    if (!isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
+    if (!isRevokeReason(reason) || !isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
     await this.prisma.deviceSession.updateMany({
       where: { id, status: { notIn: ["revoked", "compromised"] } },
       data: { status: "revoked", revokedAt: fromEpochSeconds(now), revokeReason: reason }
@@ -246,7 +278,7 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
   }
 
   async revokeTokenFamily(tokenFamilyId: string, reason: RevokeReason, now: number): Promise<number> {
-    if (!isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
+    if (!isRevokeReason(reason) || !isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
     const { count } = await this.prisma.deviceSession.updateMany({
       where: { tokenFamilyId, status: "active" },
       data: { status: "revoked", revokedAt: fromEpochSeconds(now), revokeReason: reason }
@@ -255,7 +287,7 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
   }
 
   async revokeAllUserSessions(userId: string, reason: RevokeReason, now: number): Promise<number> {
-    if (!isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
+    if (!isRevokeReason(reason) || !isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
     const { count } = await this.prisma.deviceSession.updateMany({
       where: { userId, status: "active" },
       data: { status: "revoked", revokedAt: fromEpochSeconds(now), revokeReason: reason }
@@ -276,12 +308,18 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
    * "consumed" result carries only ids (never a hash) for the replay path/audit.
    */
   async classifyRefreshTokenHash(refreshTokenHash: string): Promise<RefreshTokenClassification> {
-    const current = await this.prisma.deviceSession.findUnique({ where: { refreshTokenHash } });
-    if (current) return { kind: "current", session: mapRow(current) };
-    const consumed = await this.prisma.consumedRefreshToken.findUnique({ where: { refreshTokenHash } });
+    const [current, consumed] = await Promise.all([
+      this.prisma.deviceSession.findUnique({ where: { refreshTokenHash } }),
+      this.prisma.consumedRefreshToken.findUnique({ where: { refreshTokenHash } })
+    ]);
+    // Cross-table duplication is corruption — fail closed, never let a "current"
+    // hit mask a replay.
+    if (current && consumed) throw new DeviceSessionInvariantError();
+    // Consumed takes priority (replay signal). Only ids are returned, never a hash.
     if (consumed) {
       return { kind: "consumed", tokenFamilyId: consumed.tokenFamilyId, deviceSessionId: consumed.deviceSessionId };
     }
+    if (current) return { kind: "current", session: assertValidRow(mapRow(current)) };
     return { kind: "unknown" };
   }
 

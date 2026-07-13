@@ -40,7 +40,7 @@ model User {
 model DeviceSession {
   id                    String                 @id @default(cuid())
   userId                String
-  tokenFamilyId         String
+  tokenFamilyId         String                 @unique
   status                String                 @default("active")
   rotationCounter       Int                    @default(0)
   refreshTokenHash      String                 @unique
@@ -54,7 +54,6 @@ model DeviceSession {
   consumedRefreshTokens ConsumedRefreshToken[]
 
   @@index([userId])
-  @@index([tokenFamilyId])
   @@index([status])
   @@index([idleExpiresAt])
   @@index([absoluteExpiresAt])

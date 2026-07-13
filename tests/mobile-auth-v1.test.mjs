@@ -606,3 +606,53 @@ test("P2-003B: device label accepts human/Unicode names, rejects unsafe/blank", 
   }
   assert.equal(M.sanitizeDeviceMetadata({ deviceLabel: "a".repeat(65) }).ok, false); // too long
 });
+
+// ==================== B22B review: store invariant consistency ====================
+test("B22B: isRevokeReason allowlist", () => {
+  for (const r of M.REVOKE_REASONS) assert.equal(M.isRevokeReason(r), true);
+  for (const bad of ["", "nope", "gbrt_v1_x", "a@b.com", "line\nbreak", {}, [], 123, null]) {
+    assert.equal(M.isRevokeReason(bad), false);
+  }
+});
+
+test("B22B: hasValidSessionInvariants enforces reason + active-implies-null", () => {
+  const s = session();
+  assert.equal(M.hasValidSessionInvariants(s), true);
+  assert.equal(M.hasValidSessionInvariants({ ...s, revokeReason: "bogus" }), false);
+  assert.equal(M.hasValidSessionInvariants({ ...s, revokedAt: 500 }), false); // active w/ revokedAt
+  assert.equal(M.hasValidSessionInvariants({ ...s, revokeReason: "user_logout" }), false); // active w/ reason
+  assert.equal(M.hasValidSessionInvariants({ ...s, status: "revoked", revokedAt: 500, revokeReason: "user_logout" }), true);
+  assert.equal(M.hasValidSessionInvariants({ ...s, status: "revoked", revokedAt: NaN, revokeReason: "user_logout" }), false);
+});
+
+test("B22B: InMemory revoke methods reject invalid reason without state change", async () => {
+  const store = new M.InMemoryDeviceSessionStore();
+  const h = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  await store.createSession({ id: "s1", userId: "u1", tokenFamilyId: "f1", refreshTokenHash: h, createdAt: 100, idleExpiresAt: 1000, absoluteExpiresAt: 5000 });
+  for (const bad of ["bogus", "gbrt_v1_x", "a@b.com", "x\ny", {}, "x".repeat(100)]) {
+    await assert.rejects(() => store.revokeSession("s1", bad, 200), M.DeviceSessionInvariantError);
+  }
+  assert.equal((await store.findById("s1")).status, "active");
+  await assert.rejects(() => store.revokeTokenFamily("f1", "bogus", 200), M.DeviceSessionInvariantError);
+  await assert.rejects(() => store.revokeAllUserSessions("u1", "bogus", 200), M.DeviceSessionInvariantError);
+});
+
+test("B22B: InMemory createSession enforces hash + family exclusivity", async () => {
+  const store = new M.InMemoryDeviceSessionStore();
+  const h = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  await store.createSession({ id: "s1", userId: "u1", tokenFamilyId: "f1", refreshTokenHash: h, createdAt: 100, idleExpiresAt: 1000, absoluteExpiresAt: 5000 });
+  await assert.rejects(() => store.createSession({ id: "s2", userId: "u1", tokenFamilyId: "f2", refreshTokenHash: h, createdAt: 100, idleExpiresAt: 1000, absoluteExpiresAt: 5000 }), M.DeviceSessionInvariantError);
+  await assert.rejects(() => store.createSession({ id: "s3", userId: "u1", tokenFamilyId: "f1", refreshTokenHash: M.hashRefreshToken(M.generateRefreshToken(), PEPPER), createdAt: 100, idleExpiresAt: 1000, absoluteExpiresAt: 5000 }), M.DeviceSessionInvariantError);
+});
+
+test("B22B: InMemory rotate rejects reuse of a current or consumed hash", async () => {
+  const store = new M.InMemoryDeviceSessionStore();
+  const h0 = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  await store.createSession({ id: "s1", userId: "u1", tokenFamilyId: "f1", refreshTokenHash: h0, createdAt: 100, idleExpiresAt: 1000, absoluteExpiresAt: 5000 });
+  const hOther = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  await store.createSession({ id: "s2", userId: "u1", tokenFamilyId: "f2", refreshTokenHash: hOther, createdAt: 100, idleExpiresAt: 1000, absoluteExpiresAt: 5000 });
+  assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hOther, newIdleExpiresAt: 800, now: 200 })).status, "conflict");
+  const hNew = M.hashRefreshToken(M.generateRefreshToken(), PEPPER);
+  assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s1", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newRefreshTokenHash: hNew, newIdleExpiresAt: 800, now: 200 })).status, "rotated");
+  assert.equal((await store.rotateRefreshTokenAtomically({ sessionId: "s2", expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: hOther, newRefreshTokenHash: h0, newIdleExpiresAt: 800, now: 200 })).status, "conflict");
+});

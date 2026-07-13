@@ -81,6 +81,36 @@ re-validated by `hasValidSessionInvariants`. Because the DB column is int4,
 `DB_MAX_ROTATION_COUNTER = 2147483646` keeps the JS bound and the DB capacity
 explicitly in sync; the store rejects rotation before overflow.
 
+## Review hardening (Codex findings)
+
+- **Token family is globally unique.** `DeviceSession.tokenFamilyId` has a unique
+  index — one token family belongs to exactly ONE device session (the family holds
+  that session's successive rotated tokens). Device groups are NOT modeled by
+  sharing a family across sessions. `revokeTokenFamily` / replay revocation
+  therefore affect only the one owning session, never another user's.
+- **`revokeReason` is validated at runtime and in the DB.** A single authoritative
+  `isRevokeReason` guard gates every write (both stores); the DB adds a CHECK, and
+  an active session must carry no `revokedAt` / `revokeReason`. Invalid input fails
+  closed with a fixed, value-free error.
+- **Cross-table hash exclusivity.** A refresh-token hash may exist in AT MOST one
+  of {current sessions, consumed history}. createSession and rotate take a
+  PostgreSQL transaction advisory lock derived from the hash and check both tables
+  before writing, so a consumed hash can never become current again. `classify`
+  checks consumed first and fails closed on any cross-table duplicate — a "current"
+  hit can never mask a replay.
+- **Persisted rows are validated on read.** `findById`, `findByRefreshTokenHash`,
+  and `classifyRefreshTokenHash` re-validate every loaded row (hash format +
+  structural invariants + reason allowlist); a corrupt row (e.g. a non-whole-second
+  timestamp) fails closed rather than being returned as a valid current session.
+
+### Integration test credentials
+
+The integration suite requires EXPLICIT isolated test credentials
+(`TEST_PG_PASSWORD` / `TEST_PG_*`, or `TEST_DATABASE_ADMIN_URL`). There is NO
+hardcoded password/URL fallback; missing config fails the suite (never a silent
+skip, never a shared/dev/staging/production database). DATABASE_URL and passwords
+are never logged.
+
 ## Gates for later batches
 
 Login/Refresh/Logout API routes, token signing keys, SecureStore, and mobile UI

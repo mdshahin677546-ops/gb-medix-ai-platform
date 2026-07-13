@@ -35,8 +35,9 @@ CREATE TABLE "ConsumedRefreshToken" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "DeviceSession_refreshTokenHash_key" ON "DeviceSession"("refreshTokenHash");
+-- tokenFamilyId is GLOBALLY unique: a token family belongs to exactly one session.
+CREATE UNIQUE INDEX "DeviceSession_tokenFamilyId_key" ON "DeviceSession"("tokenFamilyId");
 CREATE INDEX "DeviceSession_userId_idx" ON "DeviceSession"("userId");
-CREATE INDEX "DeviceSession_tokenFamilyId_idx" ON "DeviceSession"("tokenFamilyId");
 CREATE INDEX "DeviceSession_status_idx" ON "DeviceSession"("status");
 CREATE INDEX "DeviceSession_idleExpiresAt_idx" ON "DeviceSession"("idleExpiresAt");
 CREATE INDEX "DeviceSession_absoluteExpiresAt_idx" ON "DeviceSession"("absoluteExpiresAt");
@@ -61,6 +62,8 @@ ALTER TABLE "DeviceSession" ADD CONSTRAINT "DeviceSession_created_le_lastUsed_ch
 ALTER TABLE "DeviceSession" ADD CONSTRAINT "DeviceSession_idle_gt_created_check" CHECK ("idleExpiresAt" > "createdAt");
 ALTER TABLE "DeviceSession" ADD CONSTRAINT "DeviceSession_absolute_gt_created_check" CHECK ("absoluteExpiresAt" > "createdAt");
 ALTER TABLE "DeviceSession" ADD CONSTRAINT "DeviceSession_idle_le_absolute_check" CHECK ("idleExpiresAt" <= "absoluteExpiresAt");
+ALTER TABLE "DeviceSession" ADD CONSTRAINT "DeviceSession_revokeReason_check" CHECK ("revokeReason" IS NULL OR "revokeReason" IN ('user_logout', 'user_logout_all', 'refresh_replay', 'token_family_revoked', 'session_version_bump', 'compromised', 'admin', 'expired'));
+ALTER TABLE "DeviceSession" ADD CONSTRAINT "DeviceSession_active_no_revocation_check" CHECK ("status" <> 'active' OR ("revokedAt" IS NULL AND "revokeReason" IS NULL));
 
 -- AddCheckConstraint: consumed hash format + consumedAt not after its own expiry.
 -- The cross-table rule (consumed.expiresAt <= owning session absoluteExpiresAt)
