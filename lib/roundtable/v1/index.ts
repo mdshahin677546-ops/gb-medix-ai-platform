@@ -14,3 +14,5 @@ export * from "./distribution";
 export * from "./monitoring";
 export * from "./audit";
 export * from "./daily-run";
+// Batch 2.2B offline orchestration (namespaced to avoid name collisions).
+export * as orchestration from "./orchestration";
