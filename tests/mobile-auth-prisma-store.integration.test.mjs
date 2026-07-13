@@ -16,6 +16,27 @@ import { createRequire } from "node:module";
 
 const requireCjs = createRequire(import.meta.url);
 
+// ---- isolated test credentials — REQUIRED, resolved FIRST (before any temp dir) ----
+// Provide TEST_DATABASE_ADMIN_URL (postgres://user:pass@host:port/postgres) OR the
+// discrete TEST_PG_* / PGPASSWORD env. Missing config throws a fixed error at module
+// load — BEFORE the compile temp dir is created — so a credential-less run fails
+// clean (fixed error, no PG.host TypeError, no .tmp-prismastore-* residue) and never
+// falls back to a hardcoded or shared database.
+function resolvePgConfig() {
+  const adminUrl = process.env.TEST_DATABASE_ADMIN_URL;
+  if (adminUrl) {
+    const u = new URL(adminUrl);
+    if (!u.password) throw new Error("TEST_DATABASE_ADMIN_URL must include a password.");
+    return { host: u.hostname, port: u.port || "5432", user: decodeURIComponent(u.username), password: decodeURIComponent(u.password) };
+  }
+  const password = process.env.TEST_PG_PASSWORD ?? process.env.PGPASSWORD;
+  if (!password) {
+    throw new Error("DeviceSession integration suite requires TEST_PG_PASSWORD (or TEST_DATABASE_ADMIN_URL). Refusing to run without explicit isolated test credentials.");
+  }
+  return { host: process.env.TEST_PG_HOST ?? "127.0.0.1", port: process.env.TEST_PG_PORT ?? "5432", user: process.env.TEST_PG_USER ?? "postgres", password };
+}
+const PG = resolvePgConfig();
+
 // ---- compile the real TS store to CommonJS and require it ----
 const MOBILE = "lib/mobile-auth/v1";
 const CONTRACT = "lib/api-contract/v1";
@@ -39,29 +60,16 @@ execFileSync(
 const M = requireCjs(resolve(outDir, "mobile-auth/v1/index.js"));
 const { PrismaClient } = requireCjs("@prisma/client");
 
-// ---- isolated test credentials — REQUIRED, no default ----
-// Provide TEST_DATABASE_ADMIN_URL (postgres://user:pass@host:port/postgres) OR the
-// discrete TEST_PG_* / PGPASSWORD env. Missing config fails the suite (never a
-// silent skip, never a hardcoded password).
-function resolvePgConfig() {
-  const adminUrl = process.env.TEST_DATABASE_ADMIN_URL;
-  if (adminUrl) {
-    const u = new URL(adminUrl);
-    if (!u.password) throw new Error("TEST_DATABASE_ADMIN_URL must include a password.");
-    return { host: u.hostname, port: u.port || "5432", user: decodeURIComponent(u.username), password: decodeURIComponent(u.password) };
-  }
-  const password = process.env.TEST_PG_PASSWORD ?? process.env.PGPASSWORD;
-  if (!password) {
-    throw new Error("DeviceSession integration suite requires TEST_PG_PASSWORD (or TEST_DATABASE_ADMIN_URL). Refusing to run without explicit isolated test credentials.");
-  }
-  return { host: process.env.TEST_PG_HOST ?? "127.0.0.1", port: process.env.TEST_PG_PORT ?? "5432", user: process.env.TEST_PG_USER ?? "postgres", password };
-}
-
-let PG;
 const DBNAME = `gbmedix_devsess_${Date.now()}_${randomBytes(4).toString("hex")}`;
-let TEST_URL, adminEnv;
+const TEST_URL = `postgresql://${PG.user}:${encodeURIComponent(PG.password)}@${PG.host}:${PG.port}/${DBNAME}?schema=public`;
+const adminEnv = { ...process.env, PGPASSWORD: PG.password };
 function psql(sql, db = "postgres") {
   execFileSync("psql", ["-h", PG.host, "-U", PG.user, "-p", PG.port, "-d", db, "-v", "ON_ERROR_STOP=1", "-tAc", sql], { env: adminEnv, stdio: "pipe" });
+}
+
+/** Remove this run's temp compile dir; never let cleanup hide a leak silently. */
+function cleanupTempDir() {
+  rmSync(outDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
 }
 
 let prisma;
@@ -71,9 +79,6 @@ const rid = (p) => `${p}_${randomBytes(6).toString("hex")}`;
 let userId, otherUserId;
 
 before(async () => {
-  PG = resolvePgConfig(); // throws (suite fails) if creds absent
-  TEST_URL = `postgresql://${PG.user}:${encodeURIComponent(PG.password)}@${PG.host}:${PG.port}/${DBNAME}?schema=public`;
-  adminEnv = { ...process.env, PGPASSWORD: PG.password };
   psql(`CREATE DATABASE "${DBNAME}"`);
   execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"],
     { env: { ...process.env, DATABASE_URL: TEST_URL }, stdio: "pipe" });
@@ -85,10 +90,16 @@ before(async () => {
 });
 
 after(async () => {
-  if (prisma) await prisma.$disconnect();
-  try { psql(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DBNAME}' AND pid <> pg_backend_pid()`); } catch { /* best effort */ }
-  psql(`DROP DATABASE IF EXISTS "${DBNAME}"`); // failure here throws -> suite fails, never silent
-  rmSync(outDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
+  // Temp is ALWAYS removed (finally). A real DROP failure still surfaces (thrown
+  // after cleanup) — never a silent pass; PG is always defined here (resolved at
+  // module load, so a credential-less run never reaches this hook).
+  try {
+    if (prisma) await prisma.$disconnect();
+    try { psql(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DBNAME}' AND pid <> pg_backend_pid()`); } catch { /* best effort */ }
+    psql(`DROP DATABASE IF EXISTS "${DBNAME}"`);
+  } finally {
+    cleanupTempDir();
+  }
 });
 
 function newStore() { return new M.PrismaDeviceSessionStore(prisma); }
