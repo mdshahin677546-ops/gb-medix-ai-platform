@@ -3,6 +3,7 @@ import {
   hasValidSessionInvariants,
   isSafeTimestamp,
   isSafeCounter,
+  isRevokeReason,
   MAX_ROTATION_COUNTER,
   type DeviceSession,
   type RevokeReason
@@ -118,6 +119,16 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
     ) {
       throw new DeviceSessionInvariantError();
     }
+    // Global hash exclusivity: a refresh-token hash may exist in AT MOST ONE place
+    // across the current sessions and the consumed history.
+    for (const other of this.byId.values()) {
+      if (other.refreshTokenHash === input.refreshTokenHash) throw new DeviceSessionInvariantError();
+    }
+    if (this.consumed.has(input.refreshTokenHash)) throw new DeviceSessionInvariantError();
+    // tokenFamilyId is globally unique — one family belongs to exactly one session.
+    for (const other of this.byId.values()) {
+      if (other.tokenFamilyId === input.tokenFamilyId) throw new DeviceSessionInvariantError();
+    }
     const session: DeviceSession = {
       id: input.id,
       userId: input.userId,
@@ -170,6 +181,15 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
     // ...and can NEVER extend the session past its absolute ceiling: clamp down.
     const newIdle = Math.min(input.newIdleExpiresAt, s.absoluteExpiresAt);
     if (newIdle <= input.now) return { status: "invalid_input" };
+    // The NEW hash must be globally unused (never a current hash of another
+    // session, never a previously-consumed hash) so a consumed hash can never
+    // become current again.
+    for (const other of this.byId.values()) {
+      if (other.id !== s.id && other.refreshTokenHash === input.newRefreshTokenHash) {
+        return { status: "conflict" };
+      }
+    }
+    if (this.consumed.has(input.newRefreshTokenHash)) return { status: "conflict" };
 
     // 9. All checks passed — commit atomically (single-threaded, no await above).
     this.consumed.set(s.refreshTokenHash, s.id);
@@ -181,6 +201,7 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
   }
 
   async revokeSession(id: string, reason: RevokeReason, now: number): Promise<void> {
+    if (!isRevokeReason(reason) || !isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
     const s = this.byId.get(id);
     if (!s || s.status === "revoked" || s.status === "compromised") return;
     s.status = "revoked";
@@ -189,6 +210,7 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
   }
 
   async revokeTokenFamily(tokenFamilyId: string, reason: RevokeReason, now: number): Promise<number> {
+    if (!isRevokeReason(reason) || !isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
     let count = 0;
     for (const s of this.byId.values()) {
       if (s.tokenFamilyId === tokenFamilyId && s.status === "active") {
@@ -202,6 +224,7 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
   }
 
   async revokeAllUserSessions(userId: string, reason: RevokeReason, now: number): Promise<number> {
+    if (!isRevokeReason(reason) || !isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
     let count = 0;
     for (const s of this.byId.values()) {
       if (s.userId === userId && s.status === "active") {
@@ -215,11 +238,12 @@ export class InMemoryDeviceSessionStore implements DeviceSessionStore {
   }
 
   async markCompromised(id: string, now: number): Promise<void> {
+    if (!isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
     const s = this.byId.get(id);
     if (!s) return;
     s.status = "compromised";
     s.revokedAt = now;
-    s.revokeReason = "compromised";
+    s.revokeReason = "compromised"; // fixed, allowlisted reason
   }
 
   /**
