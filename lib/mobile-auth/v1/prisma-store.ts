@@ -16,6 +16,11 @@ import {
   type RotateInput,
   type RotateResult
 } from "./store";
+import type { MobileAuthAuditEvent } from "./audit";
+import {
+  completeMobileAuthIdempotency,
+  insertMobileAuthAudit
+} from "./prisma-security-controls";
 
 /**
  * Transactional PostgreSQL-backed DeviceSession store (Batch 2.2B).
@@ -66,6 +71,10 @@ type ConsumedOwnerBindingRow = {
   deviceSessionId: string;
   tokenFamilyId: string;
   ownerTokenFamilyId: string | null;
+};
+
+type TransactionalAuditEvent = MobileAuthAuditEvent & {
+  outcome: NonNullable<MobileAuthAuditEvent["outcome"]>;
 };
 
 /**
@@ -288,11 +297,100 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
     }
   }
 
+  async rotateRefreshTokenAtomicallyWithAudit(
+    input: RotateInput,
+    audit: TransactionalAuditEvent,
+    idempotencyRecordId?: string
+  ): Promise<RotateResult> {
+    if (!isSafeTimestamp(input.now)) return { status: "invalid_input" };
+    if (!Number.isSafeInteger(input.newIdleExpiresAt)) return { status: "invalid_input" };
+    if (!isSafeCounter(input.expectedRotationCounter)) return { status: "invalid_input" };
+    if (!HEX64.test(input.newRefreshTokenHash)) return { status: "invalid_input" };
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const rows = (await tx.$queryRaw`
+          SELECT "id", "userId", "tokenFamilyId", "status", "rotationCounter",
+                 "refreshTokenHash", "createdAt", "lastUsedAt", "idleExpiresAt",
+                 "absoluteExpiresAt", "revokedAt", "revokeReason"
+          FROM "DeviceSession" WHERE "id" = ${input.sessionId} FOR UPDATE
+        `) as DeviceSessionRow[];
+        const row = rows[0];
+        if (!row) return { status: "not_found" };
+
+        const s = mapRow(row);
+        if (!hasValidSessionInvariants(s)) return { status: "invalid_input" };
+        if (s.status !== "active") return { status: "not_active" };
+        if (input.now < s.lastUsedAt) return { status: "invalid_input" };
+        if (isSessionTimeExpired(s, input.now)) return { status: "expired" };
+        if (
+          s.rotationCounter !== input.expectedRotationCounter ||
+          s.refreshTokenHash !== input.expectedCurrentRefreshTokenHash
+        ) {
+          return { status: "conflict" };
+        }
+        if (s.rotationCounter >= DB_MAX_ROTATION_COUNTER) return { status: "invalid_input" };
+        if (input.newIdleExpiresAt <= input.now) return { status: "invalid_input" };
+        const newIdle = Math.min(input.newIdleExpiresAt, s.absoluteExpiresAt);
+        if (newIdle <= input.now) return { status: "invalid_input" };
+
+        await tx.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(hashtextextended(${input.newRefreshTokenHash}, 0::bigint))) _l`;
+        const newInCurrent = (await tx.$queryRaw`SELECT 1 FROM "DeviceSession" WHERE "refreshTokenHash" = ${input.newRefreshTokenHash} LIMIT 1`) as unknown[];
+        const newInConsumed = (await tx.$queryRaw`SELECT 1 FROM "ConsumedRefreshToken" WHERE "refreshTokenHash" = ${input.newRefreshTokenHash} LIMIT 1`) as unknown[];
+        if (newInCurrent.length > 0 || newInConsumed.length > 0) return { status: "conflict" };
+
+        await tx.consumedRefreshToken.create({
+          data: {
+            deviceSessionId: s.id,
+            tokenFamilyId: s.tokenFamilyId,
+            refreshTokenHash: s.refreshTokenHash,
+            consumedAt: fromEpochSeconds(input.now),
+            expiresAt: fromEpochSeconds(s.absoluteExpiresAt)
+          }
+        });
+        const updated = await tx.deviceSession.update({
+          where: { id: s.id },
+          data: {
+            rotationCounter: s.rotationCounter + 1,
+            refreshTokenHash: input.newRefreshTokenHash,
+            idleExpiresAt: fromEpochSeconds(newIdle),
+            lastUsedAt: fromEpochSeconds(input.now)
+          }
+        });
+        await insertMobileAuthAudit(tx, audit);
+        if (idempotencyRecordId) await completeMobileAuthIdempotency(tx, idempotencyRecordId, input.now);
+        return { status: "rotated", session: mapRow(updated) };
+      });
+    } catch (error) {
+      return { status: isUniqueViolation(error) ? "conflict" : "invalid_input" };
+    }
+  }
+
   async revokeSession(id: string, reason: RevokeReason, now: number): Promise<void> {
     if (!isRevokeReason(reason) || !isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
     await this.prisma.deviceSession.updateMany({
       where: { id, status: { notIn: ["revoked", "compromised"] } },
       data: { status: "revoked", revokedAt: fromEpochSeconds(now), revokeReason: reason }
+    });
+  }
+
+  async revokeSessionWithAudit(
+    id: string,
+    reason: RevokeReason,
+    now: number,
+    audit: TransactionalAuditEvent,
+    idempotencyRecordId?: string
+  ): Promise<void> {
+    if (!isRevokeReason(reason) || !isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        UPDATE "DeviceSession"
+        SET "status" = 'revoked', "revokedAt" = ${fromEpochSeconds(now)}, "revokeReason" = ${reason}
+        WHERE "id" = ${id} AND "status" NOT IN ('revoked', 'compromised')
+        RETURNING "id"
+      `;
+      await insertMobileAuthAudit(tx, audit);
+      if (idempotencyRecordId) await completeMobileAuthIdempotency(tx, idempotencyRecordId, now);
     });
   }
 
@@ -312,6 +410,27 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
       data: { status: "revoked", revokedAt: fromEpochSeconds(now), revokeReason: reason }
     });
     return count;
+  }
+
+  async revokeAllUserSessionsWithAudit(
+    userId: string,
+    reason: RevokeReason,
+    now: number,
+    audit: TransactionalAuditEvent,
+    idempotencyRecordId?: string
+  ): Promise<number> {
+    if (!isRevokeReason(reason) || !isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
+    return this.prisma.$transaction(async (tx) => {
+      const updated = (await tx.$queryRaw`
+        UPDATE "DeviceSession"
+        SET "status" = 'revoked', "revokedAt" = ${fromEpochSeconds(now)}, "revokeReason" = ${reason}
+        WHERE "userId" = ${userId} AND "status" = 'active'
+        RETURNING "id"
+      `) as Array<{ id: string }>;
+      await insertMobileAuthAudit(tx, audit);
+      if (idempotencyRecordId) await completeMobileAuthIdempotency(tx, idempotencyRecordId, now);
+      return updated.length;
+    });
   }
 
   async markCompromised(id: string, now: number): Promise<void> {
@@ -382,6 +501,48 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
         WHERE "tokenFamilyId" = ${consumed.tokenFamilyId} AND "status" = 'active'
         RETURNING "id"
       `) as Array<{ id: string }>;
+      return {
+        replay: true,
+        tokenFamilyId: consumed.tokenFamilyId,
+        revokedCount: updated.length,
+        audit: "mobile_refresh_replay_detected"
+      };
+    });
+  }
+
+  async revokeFamilyOnReplayWithAudit(
+    refreshTokenHash: string,
+    now: number,
+    audit: TransactionalAuditEvent,
+    idempotencyRecordId?: string
+  ): Promise<ReplayRevocationResult> {
+    if (!isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
+    return this.prisma.$transaction(async (tx) => {
+      const rows = (await tx.$queryRaw`
+        SELECT "deviceSessionId", "tokenFamilyId" FROM "ConsumedRefreshToken"
+        WHERE "refreshTokenHash" = ${refreshTokenHash} LIMIT 1
+        FOR UPDATE
+      `) as Array<{ deviceSessionId: string; tokenFamilyId: string }>;
+      const consumedRow = rows[0];
+      if (!consumedRow) return { replay: false, revokedCount: 0, audit: null };
+      const ownerRows = (await tx.$queryRaw`
+        SELECT "tokenFamilyId" AS "ownerTokenFamilyId" FROM "DeviceSession"
+        WHERE "id" = ${consumedRow.deviceSessionId} LIMIT 1
+        FOR UPDATE
+      `) as Array<{ ownerTokenFamilyId: string }>;
+      const consumed = assertConsumedOwnerBinding({
+        deviceSessionId: consumedRow.deviceSessionId,
+        tokenFamilyId: consumedRow.tokenFamilyId,
+        ownerTokenFamilyId: ownerRows[0]?.ownerTokenFamilyId ?? null
+      });
+      const updated = (await tx.$queryRaw`
+        UPDATE "DeviceSession"
+        SET "status" = 'revoked', "revokedAt" = ${fromEpochSeconds(now)}, "revokeReason" = 'refresh_replay'
+        WHERE "tokenFamilyId" = ${consumed.tokenFamilyId} AND "status" = 'active'
+        RETURNING "id"
+      `) as Array<{ id: string }>;
+      await insertMobileAuthAudit(tx, audit);
+      if (idempotencyRecordId) await completeMobileAuthIdempotency(tx, idempotencyRecordId, now);
       return {
         replay: true,
         tokenFamilyId: consumed.tokenFamilyId,

@@ -1,4 +1,5 @@
 import { toNextResponse } from "@/lib/api-v1/http";
+import { prepareMobileAuthRequest } from "@/lib/api-v1/mobile-auth-boundary";
 import { runMobileLogout } from "@/lib/api-v1/mobile-session";
 
 /**
@@ -6,6 +7,7 @@ import { runMobileLogout } from "@/lib/api-v1/mobile-session";
  * presented refresh token. Idempotent, non-revealing. Thin adapter.
  */
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => undefined);
-  return toNextResponse(await runMobileLogout({ body }));
+  const prepared = await prepareMobileAuthRequest(req, "logout");
+  if (!prepared.ok) return toNextResponse(prepared.result);
+  return toNextResponse(await runMobileLogout(prepared.input));
 }

@@ -1,4 +1,5 @@
 import { toNextResponse } from "@/lib/api-v1/http";
+import { prepareMobileAuthRequest } from "@/lib/api-v1/mobile-auth-boundary";
 import { runMobileRefresh } from "@/lib/api-v1/mobile-session";
 
 /**
@@ -7,6 +8,7 @@ import { runMobileRefresh } from "@/lib/api-v1/mobile-session";
  * NextResponse (private, no-store; fixed safe error contracts). No login/OAuth.
  */
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => undefined);
-  return toNextResponse(await runMobileRefresh({ body }));
+  const prepared = await prepareMobileAuthRequest(req, "refresh");
+  if (!prepared.ok) return toNextResponse(prepared.result);
+  return toNextResponse(await runMobileRefresh(prepared.input));
 }

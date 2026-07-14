@@ -8,12 +8,12 @@ datasource db {
 }
 
 model User {
-  id                     String                  @id @default(cuid())
-  email                  String                  @unique
-  status                 String                  @default("pending")
-  sessionVersion         Int                     @default(1)
+  id                     String                      @id @default(cuid())
+  email                  String                      @unique
+  status                 String                      @default("pending")
+  sessionVersion         Int                         @default(1)
   emailVerifiedAt        DateTime?
-  createdAt              DateTime                @default(now())
+  createdAt              DateTime                    @default(now())
   payments               PaymentRecord[]
   tcmRecords             TCMRecord[]
   rfqRecords             RFQRecord[]
@@ -28,6 +28,7 @@ model User {
   emailVerifications     EmailVerification[]
   aiProcessingConsents   AIProcessingConsent[]
   deviceSessions         DeviceSession[]
+  mobileAuthRateLimits   MobileAuthRateLimitBucket[]
 
   @@index([status])
   @@index([createdAt])
@@ -76,6 +77,67 @@ model ConsumedRefreshToken {
   @@index([deviceSessionId])
   @@index([tokenFamilyId])
   @@index([expiresAt])
+}
+
+// Batch 2.2D - Mobile auth API security controls. These tables persist only
+// de-identified digests and enum state for request hardening; they never store
+// raw tokens, Authorization headers, Idempotency-Key values, request JSON, email,
+// phone, patient, health, payment, provider, cookie, pepper, or signing keys.
+model MobileAuthRateLimitBucket {
+  id            String   @id @default(cuid())
+  endpoint      String
+  subjectDigest String
+  bucketKey     String   @unique
+  windowStart   DateTime
+  windowSeconds Int
+  count         Int      @default(0)
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([endpoint, subjectDigest])
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+model MobileAuthIdempotencyRecord {
+  id               String    @id @default(cuid())
+  endpoint         String
+  keyDigest        String    @unique
+  actorDigest      String
+  credentialDigest String
+  requestDigest    String
+  status           String
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime
+  completedAt      DateTime?
+
+  @@index([endpoint])
+  @@index([actorDigest])
+  @@index([credentialDigest])
+  @@index([expiresAt])
+  @@index([status])
+}
+
+model MobileAuthAuditLog {
+  id              String   @id @default(cuid())
+  event           String
+  reason          String?
+  outcome         String
+  occurredAt      DateTime
+  userId          String?
+  deviceSessionId String?
+  tokenFamilyId   String?
+  createdAt       DateTime @default(now())
+
+  @@index([event])
+  @@index([outcome])
+  @@index([occurredAt])
+  @@index([userId])
+  @@index([deviceSessionId])
+  @@index([tokenFamilyId])
 }
 
 model Merchant {

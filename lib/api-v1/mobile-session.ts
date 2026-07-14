@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { prisma } from "../prisma";
 import { PrismaDeviceSessionStore } from "../mobile-auth/v1/prisma-store";
+import { PrismaMobileAuthSecurityControls } from "../mobile-auth/v1/prisma-security-controls";
 import { loadMobileAuthConfig, accessTokenPolicyFromConfig } from "../mobile-auth/v1/config";
 import type { MobileUserFacts } from "../mobile-auth/v1/eligibility";
 import { newRequestId } from "./request-context";
@@ -47,7 +48,7 @@ async function getUserFacts(userId: string): Promise<MobileUserFacts | null> {
   };
 }
 
-export async function runMobileRefresh(input: { body: unknown }): Promise<HandlerResult> {
+export async function runMobileRefresh(input: { body: unknown; idempotencyKey?: string }): Promise<HandlerResult> {
   const requestId = newRequestId();
   try {
     const config = loadMobileAuthConfig();
@@ -60,9 +61,17 @@ export async function runMobileRefresh(input: { body: unknown }): Promise<Handle
       audience: config.audience,
       accessTtlSeconds: config.accessTtlSeconds,
       refreshIdleTtlSeconds: config.refreshIdleTtlSeconds,
+      security: new PrismaMobileAuthSecurityControls(
+        prisma as unknown as ConstructorParameters<typeof PrismaMobileAuthSecurityControls>[0],
+        config.controlKey
+      ),
       revokeFamilyOnReplay: (hash, now) => store.revokeFamilyOnReplay(hash, now),
+      revokeFamilyOnReplayWithAudit: (hash, now, audit, idempotencyRecordId) =>
+        store.revokeFamilyOnReplayWithAudit(hash, now, audit, idempotencyRecordId),
       findCurrentByHash: (hash) => store.findByRefreshTokenHash(hash),
       rotate: (rotateInput) => store.rotateRefreshTokenAtomically(rotateInput),
+      rotateWithAudit: (rotateInput, audit, idempotencyRecordId) =>
+        store.rotateRefreshTokenAtomicallyWithAudit(rotateInput, audit, idempotencyRecordId),
       getUserFacts,
       newTokenId: () => randomUUID()
     });
@@ -72,7 +81,7 @@ export async function runMobileRefresh(input: { body: unknown }): Promise<Handle
   }
 }
 
-export async function runMobileLogout(input: { body: unknown }): Promise<HandlerResult> {
+export async function runMobileLogout(input: { body: unknown; idempotencyKey?: string }): Promise<HandlerResult> {
   const requestId = newRequestId();
   try {
     const config = loadMobileAuthConfig();
@@ -80,8 +89,14 @@ export async function runMobileLogout(input: { body: unknown }): Promise<Handler
     const handler = createMobileLogoutHandler({
       now: nowSeconds,
       pepper: config.pepper,
+      security: new PrismaMobileAuthSecurityControls(
+        prisma as unknown as ConstructorParameters<typeof PrismaMobileAuthSecurityControls>[0],
+        config.controlKey
+      ),
       findCurrentByHash: (hash) => store.findByRefreshTokenHash(hash),
-      revokeSession: (id, reason, now) => store.revokeSession(id, reason, now)
+      revokeSession: (id, reason, now) => store.revokeSession(id, reason, now),
+      revokeSessionWithAudit: (id, reason, now, audit, idempotencyRecordId) =>
+        store.revokeSessionWithAudit(id, reason, now, audit, idempotencyRecordId)
     });
     return await handler(input);
   } catch {
@@ -89,7 +104,11 @@ export async function runMobileLogout(input: { body: unknown }): Promise<Handler
   }
 }
 
-export async function runMobileLogoutAll(input: { body: unknown; authorization: unknown }): Promise<HandlerResult> {
+export async function runMobileLogoutAll(input: {
+  body: unknown;
+  authorization: unknown;
+  idempotencyKey?: string;
+}): Promise<HandlerResult> {
   const requestId = newRequestId();
   try {
     const config = loadMobileAuthConfig();
@@ -98,8 +117,14 @@ export async function runMobileLogoutAll(input: { body: unknown; authorization: 
       now: nowSeconds,
       signingKey: config.signingKey,
       policy: accessTokenPolicyFromConfig(config),
+      security: new PrismaMobileAuthSecurityControls(
+        prisma as unknown as ConstructorParameters<typeof PrismaMobileAuthSecurityControls>[0],
+        config.controlKey
+      ),
       getUserFacts,
-      revokeAllUserSessions: (userId, reason, now) => store.revokeAllUserSessions(userId, reason, now)
+      revokeAllUserSessions: (userId, reason, now) => store.revokeAllUserSessions(userId, reason, now),
+      revokeAllUserSessionsWithAudit: (userId, reason, now, audit, idempotencyRecordId) =>
+        store.revokeAllUserSessionsWithAudit(userId, reason, now, audit, idempotencyRecordId)
     });
     return await handler(input);
   } catch {

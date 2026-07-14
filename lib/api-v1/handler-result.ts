@@ -15,7 +15,8 @@ export type HandlerResult = {
 
 export function finalize(
   requestId: string,
-  result: ApiOk<unknown> | ApiFailure
+  result: ApiOk<unknown> | ApiFailure,
+  extraHeaders: Record<string, string> = {}
 ): HandlerResult {
-  return { status: result.status, headers: buildApiHeaders(requestId), body: result.body };
+  return { status: result.status, headers: { ...buildApiHeaders(requestId), ...extraHeaders }, body: result.body };
 }

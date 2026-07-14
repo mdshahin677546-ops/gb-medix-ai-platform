@@ -19,7 +19,38 @@ export type MobileLogoutDeps = {
   pepper: string;
   findCurrentByHash: (refreshTokenHash: string) => Promise<DeviceSession | null>;
   revokeSession: (id: string, reason: RevokeReason, now: number) => Promise<void>;
+  revokeSessionWithAudit?: (
+    id: string,
+    reason: RevokeReason,
+    now: number,
+    audit: {
+      event: "mobile_session_revoked";
+      occurredAt: number;
+      userId: string;
+      deviceSessionId: string;
+      reason: "user_logout";
+      outcome: "success";
+    },
+    idempotencyRecordId?: string
+  ) => Promise<void>;
   audit?: (event: unknown) => void;
+  security?: {
+    credentialDigest: (value: string) => string;
+    requestDigest: (endpoint: "logout", body: Record<string, unknown>) => string;
+    checkRateLimit: (input: { endpoint: "logout"; subjectDigest: string; now: number }) => Promise<
+      { ok: true } | { ok: false; retryAfterSeconds: number }
+    >;
+    claimIdempotency: (input: {
+      endpoint: "logout";
+      rawKey: string;
+      actorDigest: string;
+      credentialDigest: string;
+      requestDigest: string;
+      now: number;
+    }) => Promise<{ status: "claimed"; id: string } | { status: "completed"; id: string } | { status: "conflict" }>;
+    completeIdempotency: (id: string, now: number) => Promise<void>;
+    failIdempotency: (id: string, now: number) => Promise<void>;
+  };
 };
 
 function emitAudit(audit: ((e: unknown) => void) | undefined, input: unknown): void {
@@ -32,30 +63,67 @@ function emitAudit(audit: ((e: unknown) => void) | undefined, input: unknown): v
 }
 
 export function createMobileLogoutHandler(deps: MobileLogoutDeps) {
-  return async function POST(input: { body: unknown }): Promise<HandlerResult> {
+  return async function POST(input: { body: unknown; idempotencyKey?: string }): Promise<HandlerResult> {
     const requestId = newRequestId();
+    let idempotencyRecordId: string | undefined;
+    let nowForFailure: number | null = null;
     try {
       const parsed = mobileLogoutRequestSchema.safeParse(input.body);
       if (!parsed.success) return finalize(requestId, failure("VALIDATION_ERROR", requestId));
 
       const now = deps.now();
+      nowForFailure = now;
       const presentedHash = hashRefreshToken(parsed.data.refreshToken, deps.pepper);
+
+      if (deps.security && input.idempotencyKey) {
+        const subjectDigest = deps.security.credentialDigest(presentedHash);
+        const claim = await deps.security.claimIdempotency({
+          endpoint: "logout",
+          rawKey: input.idempotencyKey,
+          actorDigest: subjectDigest,
+          credentialDigest: subjectDigest,
+          requestDigest: deps.security.requestDigest("logout", parsed.data),
+          now
+        });
+        if (claim.status === "conflict") return finalize(requestId, failure("CONFLICT", requestId));
+        if (claim.status === "completed") return finalize(requestId, success({ acknowledged: true }, requestId));
+        idempotencyRecordId = claim.id;
+        const limited = await deps.security.checkRateLimit({ endpoint: "logout", subjectDigest, now });
+        if (!limited.ok) {
+          await deps.security.completeIdempotency(idempotencyRecordId, now);
+          return finalize(requestId, failure("RATE_LIMITED", requestId), {
+            "Retry-After": String(limited.retryAfterSeconds)
+          });
+        }
+      }
       const current = await deps.findCurrentByHash(presentedHash);
 
       if (current && current.status === "active") {
-        await deps.revokeSession(current.id, "user_logout", now);
-        emitAudit(deps.audit, {
-          event: "mobile_session_revoked",
+        const audit = {
+          event: "mobile_session_revoked" as const,
           occurredAt: now,
           userId: current.userId,
           deviceSessionId: current.id,
-          reason: "user_logout"
-        });
+          reason: "user_logout" as const,
+          outcome: "success" as const
+        };
+        if (deps.revokeSessionWithAudit) {
+          await deps.revokeSessionWithAudit(current.id, "user_logout", now, audit, idempotencyRecordId);
+        } else {
+          await deps.revokeSession(current.id, "user_logout", now);
+          emitAudit(deps.audit, audit);
+          if (idempotencyRecordId && deps.security) await deps.security.completeIdempotency(idempotencyRecordId, now);
+        }
+      } else if (idempotencyRecordId && deps.security) {
+        await deps.security.completeIdempotency(idempotencyRecordId, now);
       }
 
       // Identical acknowledgement regardless of whether a session was found/revoked.
       return finalize(requestId, success({ acknowledged: true }, requestId));
     } catch {
+      if (idempotencyRecordId && deps.security && nowForFailure != null) {
+        await deps.security.failIdempotency(idempotencyRecordId, nowForFailure).catch(() => undefined);
+      }
       return finalize(requestId, internalFailure(requestId));
     }
   };
