@@ -14,6 +14,14 @@ const DEVICE_SESSION_STATUS_SET: ReadonlySet<string> = new Set(DEVICE_SESSION_ST
 /** rotationCounter must stay below this so the NEXT increment is still an exact integer. */
 export const MAX_ROTATION_COUNTER = Number.MAX_SAFE_INTEGER - 1;
 
+/**
+ * DB-backed stores use a Postgres `Int` (int4, max 2^31-1) for rotationCounter, so
+ * the counter is capped BELOW that: a store rejects rotation once the counter
+ * reaches this value so the next increment (+1) still fits int4. This keeps the DB
+ * column capacity and the JS constant explicitly in sync (no silent drift).
+ */
+export const DB_MAX_ROTATION_COUNTER = 2147483646;
+
 export const REVOKE_REASONS = [
   "user_logout",
   "user_logout_all",
@@ -25,6 +33,13 @@ export const REVOKE_REASONS = [
   "expired"
 ] as const;
 export type RevokeReason = (typeof REVOKE_REASONS)[number];
+
+const REVOKE_REASON_SET: ReadonlySet<string> = new Set(REVOKE_REASONS);
+
+/** Authoritative runtime guard for a revoke reason (TS types are not enforced at runtime). */
+export function isRevokeReason(value: unknown): value is RevokeReason {
+  return typeof value === "string" && REVOKE_REASON_SET.has(value);
+}
 
 export type DeviceSession = {
   id: string;
@@ -72,6 +87,13 @@ export function hasValidSessionInvariants(session: DeviceSession): boolean {
   if (session.idleExpiresAt <= session.createdAt) return false;
   if (session.absoluteExpiresAt <= session.createdAt) return false;
   if (session.idleExpiresAt > session.absoluteExpiresAt) return false;
+  // revokedAt, if present, must be a safe timestamp; revokeReason, if present,
+  // must be an allowlisted reason; an ACTIVE session must carry neither.
+  if (session.revokedAt !== null && !isSafeTimestamp(session.revokedAt)) return false;
+  if (session.revokeReason !== null && !isRevokeReason(session.revokeReason)) return false;
+  if (session.status === "active" && (session.revokedAt !== null || session.revokeReason !== null)) {
+    return false;
+  }
   return true;
 }
 
