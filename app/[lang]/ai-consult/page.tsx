@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import { getLang } from "@/lib/lang";
 import { getFunnelCopy } from "@/lib/public-funnel/i18n";
+import { consultMetadata } from "@/lib/public-funnel/consult-context";
 import { PublicSiteLayout } from "@/components/public/PublicSiteLayout";
 import { Container, Card, ButtonLink, Badge } from "@/components/public/ui";
 import { MedicalDisclaimer } from "@/components/public/medical";
 
 export function generateMetadata({ params }: { params: { lang: string } }): Metadata {
-  const copy = getFunnelCopy(getLang(params.lang));
-  return { title: `${copy.consult.title} · GB Medix AI`, description: copy.knowledge.subtitle };
+  return consultMetadata(getFunnelCopy(getLang(params.lang)));
 }
 
 export default function AiConsultInfoPage({ params }: { params: { lang: string } }) {

@@ -127,7 +127,7 @@ export default function RoundtableDetailPage({ params }: { params: { lang: strin
 
               {/* Mid-body consult CTA (exactly one) */}
               <div className="rounded-2xl border border-mint/25 bg-mint/5 px-5 py-4">
-                <ConsultationCTA lang={lang} copy={copy} variant="secondary" label={copy.detail.ctaMid} />
+                <ConsultationCTA lang={lang} copy={copy} variant="secondary" label={copy.detail.ctaMid} topic={rt.category} />
               </div>
 
               {/* Claims & evidence (collapsible) */}
@@ -197,7 +197,7 @@ export default function RoundtableDetailPage({ params }: { params: { lang: strin
               <div className="rounded-2xl border border-mint/30 bg-gradient-to-r from-mint/10 to-transparent px-6 py-6 text-center">
                 <p className="text-base font-semibold text-ink">{copy.detail.nextStep}</p>
                 <div className="mt-4 flex justify-center">
-                  <ConsultationCTA lang={lang} copy={copy} variant="primary" label={copy.detail.ctaEnd} />
+                  <ConsultationCTA lang={lang} copy={copy} variant="primary" label={copy.detail.ctaEnd} topic={rt.category} />
                 </div>
               </div>
             </div>

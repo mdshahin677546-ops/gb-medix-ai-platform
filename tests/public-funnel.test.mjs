@@ -211,7 +211,9 @@ test("detail page: has all mandated sections; products after services; risk sect
   assert.equal(/products|\/shop/.test(riskBlock), false, "risk section must not contain a product purchase CTA");
 });
 
-test("consult CTA component targets the real /consult route", () => {
+test("consult CTA component routes to consult via the safe context builder", () => {
+  // Behavioral coverage of the built href lives in roundtable-conversion-context.test.mjs;
+  // here we only assert the component is wired to the safe builder (Batch 1.1).
   const rt = read("components/public/roundtable.tsx");
-  assert.ok(/href=\{`\/\$\{lang\}\/consult`\}/.test(rt), "ConsultationCTA must point at /{lang}/consult");
+  assert.ok(rt.includes("buildConsultHref"), "ConsultationCTA must use buildConsultHref for safe context");
 });

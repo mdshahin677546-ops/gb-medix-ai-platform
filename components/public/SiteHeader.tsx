@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { Lang } from "@/lib/lang";
 import type { FunnelCopy } from "@/lib/public-funnel/i18n";
+import { swapLocaleInPath } from "@/lib/public-funnel/locale-path";
 
 /** Public global header: business-priority nav, active state, search, language, login, and the primary consult CTA. */
 export function SiteHeader({ lang, copy }: { lang: Lang; copy: FunnelCopy }) {
@@ -23,9 +24,9 @@ export function SiteHeader({ lang, copy }: { lang: Lang; copy: FunnelCopy }) {
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
   const otherLang: Lang = lang === "zh" ? "en" : "zh";
   const swapLang = () => {
-    const parts = pathname.split("/");
-    if (parts[1]) parts[1] = otherLang;
-    router.push(parts.join("/") || `/${otherLang}`);
+    // Preserve the current query + active filters when switching language.
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    router.push(swapLocaleInPath(pathname, search, otherLang));
   };
   const submitSearch = (e: React.FormEvent) => {
     e.preventDefault();
