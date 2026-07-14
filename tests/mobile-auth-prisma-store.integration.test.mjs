@@ -219,6 +219,21 @@ test("double concurrent CAS on one session: one rotated, one conflict, counter +
   assert.equal(await prisma.consumedRefreshToken.count({ where: { deviceSessionId: id } }), 1);
 });
 
+test("2/10/50 worker concurrent CAS: exactly one rotation wins", async () => {
+  const store = newStore();
+  for (const workers of [2, 10, 50]) {
+    const { id, h0 } = await seed(store);
+    const base = { sessionId: id, expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: h0, newIdleExpiresAt: BASE + 2000, now: BASE + 10 };
+    const results = await Promise.all(
+      Array.from({ length: workers }, () => store.rotateRefreshTokenAtomically({ ...base, newRefreshTokenHash: hex() }))
+    );
+    assert.equal(results.filter((r) => r.status === "rotated").length, 1);
+    assert.equal(results.filter((r) => r.status === "conflict").length, workers - 1);
+    assert.equal((await store.findById(id)).rotationCounter, 1);
+    assert.equal(await prisma.consumedRefreshToken.count({ where: { deviceSessionId: id } }), 1);
+  }
+});
+
 // 11: revoked/compromised/expired do not rotate; absolute clamp
 test("revoked/compromised/expired don't rotate; new idle clamps to absolute", async () => {
   const store = newStore();
@@ -250,6 +265,52 @@ test("confirmed replay revokes only the owning session; other users stay active"
   assert.equal((await store.findById(a.id)).status, "revoked");
   assert.equal((await store.findById(other.id)).status, "active"); // untouched
   assert.equal((await store.revokeFamilyOnReplay(hex(), BASE + 20)).replay, false);
+});
+
+test("consumed token family binding rejects mismatch and runtime fails closed", async () => {
+  const store = newStore();
+  const a = await seed(store);
+  const b = await seed(store, { userId: otherUserId });
+  await store.rotateRefreshTokenAtomically({ sessionId: a.id, expectedRotationCounter: 0, expectedCurrentRefreshTokenHash: a.h0, newRefreshTokenHash: hex(), newIdleExpiresAt: BASE + 2000, now: BASE + 10 });
+
+  await assert.rejects(
+    () => prisma.$executeRawUnsafe(
+      `INSERT INTO "ConsumedRefreshToken"("id","deviceSessionId","tokenFamilyId","refreshTokenHash","consumedAt","expiresAt") VALUES ($1,$2,$3,$4,$5,$6)`,
+      rid("con"), a.id, b.fam, hex(), new Date((BASE + 20) * 1000), new Date((BASE + 1000) * 1000)
+    ),
+    /foreign key/i
+  );
+
+  const validHash = hex();
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "ConsumedRefreshToken"("id","deviceSessionId","tokenFamilyId","refreshTokenHash","consumedAt","expiresAt") VALUES ($1,$2,$3,$4,$5,$6)`,
+    rid("con"), a.id, a.fam, validHash, new Date((BASE + 20) * 1000), new Date((BASE + 1000) * 1000)
+  );
+  const valid = await store.classifyRefreshTokenHash(validHash);
+  assert.equal(valid.kind, "consumed");
+  assert.equal(valid.deviceSessionId, a.id);
+  assert.equal(valid.tokenFamilyId, a.fam);
+  await prisma.consumedRefreshToken.delete({ where: { refreshTokenHash: validHash } });
+
+  await prisma.$executeRawUnsafe(`ALTER TABLE "ConsumedRefreshToken" DROP CONSTRAINT "ConsumedRefreshToken_deviceSessionId_tokenFamilyId_fkey"`);
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "ConsumedRefreshToken" SET "tokenFamilyId" = $1 WHERE "refreshTokenHash" = $2`,
+      b.fam, a.h0
+    );
+    await assert.rejects(() => store.classifyRefreshTokenHash(a.h0), M.DeviceSessionInvariantError);
+    await assert.rejects(() => store.revokeFamilyOnReplay(a.h0, BASE + 20), M.DeviceSessionInvariantError);
+    assert.equal((await store.findById(a.id)).status, "active");
+    assert.equal((await store.findById(b.id)).status, "active");
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "ConsumedRefreshToken" SET "tokenFamilyId" = $1 WHERE "refreshTokenHash" = $2`,
+      a.fam, a.h0
+    );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "ConsumedRefreshToken" ADD CONSTRAINT "ConsumedRefreshToken_deviceSessionId_tokenFamilyId_fkey" FOREIGN KEY ("deviceSessionId", "tokenFamilyId") REFERENCES "DeviceSession"("id", "tokenFamilyId") ON DELETE CASCADE ON UPDATE CASCADE`
+    );
+  }
 });
 
 // 13 + B22B-P2-001: runtime revokeReason matrix

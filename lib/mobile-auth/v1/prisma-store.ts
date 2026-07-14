@@ -62,6 +62,12 @@ type DeviceSessionRow = {
   revokeReason: string | null;
 };
 
+type ConsumedOwnerBindingRow = {
+  deviceSessionId: string;
+  tokenFamilyId: string;
+  ownerTokenFamilyId: string | null;
+};
+
 /**
  * Map a DB row to the domain type. Any unmappable field becomes NaN / raw value so
  * hasValidSessionInvariants rejects the record (fail closed) rather than silently
@@ -84,6 +90,18 @@ function mapRow(row: DeviceSessionRow): DeviceSession {
   };
 }
 
+function assertConsumedOwnerBinding(row: ConsumedOwnerBindingRow): { deviceSessionId: string; tokenFamilyId: string } {
+  const ownerTokenFamilyId = row.ownerTokenFamilyId == null ? null : String(row.ownerTokenFamilyId);
+  const consumedTokenFamilyId = String(row.tokenFamilyId);
+  if (!ownerTokenFamilyId || ownerTokenFamilyId !== consumedTokenFamilyId) {
+    throw new DeviceSessionInvariantError();
+  }
+  return {
+    deviceSessionId: String(row.deviceSessionId),
+    tokenFamilyId: ownerTokenFamilyId
+  };
+}
+
 // ---- Injected Prisma surface (structural; a real PrismaClient satisfies it) ----
 type Tx = {
   $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
@@ -94,6 +112,7 @@ type Tx = {
   consumedRefreshToken: { create: (args: { data: Record<string, unknown> }) => Promise<unknown> };
 };
 export type MobileAuthPrisma = {
+  $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
   $transaction: <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>;
   deviceSession: {
     findUnique: (args: { where: Record<string, unknown> }) => Promise<DeviceSessionRow | null>;
@@ -308,15 +327,23 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
    * "consumed" result carries only ids (never a hash) for the replay path/audit.
    */
   async classifyRefreshTokenHash(refreshTokenHash: string): Promise<RefreshTokenClassification> {
-    const [current, consumed] = await Promise.all([
+    const [current, consumedRows] = await Promise.all([
       this.prisma.deviceSession.findUnique({ where: { refreshTokenHash } }),
-      this.prisma.consumedRefreshToken.findUnique({ where: { refreshTokenHash } })
+      this.prisma.$queryRaw`
+        SELECT c."deviceSessionId", c."tokenFamilyId", s."tokenFamilyId" AS "ownerTokenFamilyId"
+        FROM "ConsumedRefreshToken" c
+        LEFT JOIN "DeviceSession" s ON s."id" = c."deviceSessionId"
+        WHERE c."refreshTokenHash" = ${refreshTokenHash}
+        LIMIT 1
+      `
     ]);
+    const consumedRow = (consumedRows as ConsumedOwnerBindingRow[])[0];
     // Cross-table duplication is corruption — fail closed, never let a "current"
     // hit mask a replay.
-    if (current && consumed) throw new DeviceSessionInvariantError();
+    if (current && consumedRow) throw new DeviceSessionInvariantError();
     // Consumed takes priority (replay signal). Only ids are returned, never a hash.
-    if (consumed) {
+    if (consumedRow) {
+      const consumed = assertConsumedOwnerBinding(consumedRow);
       return { kind: "consumed", tokenFamilyId: consumed.tokenFamilyId, deviceSessionId: consumed.deviceSessionId };
     }
     if (current) return { kind: "current", session: assertValidRow(mapRow(current)) };
@@ -333,11 +360,22 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
     if (!isSafeTimestamp(now)) throw new DeviceSessionInvariantError();
     return this.prisma.$transaction(async (tx) => {
       const rows = (await tx.$queryRaw`
-        SELECT "tokenFamilyId" FROM "ConsumedRefreshToken"
+        SELECT "deviceSessionId", "tokenFamilyId" FROM "ConsumedRefreshToken"
         WHERE "refreshTokenHash" = ${refreshTokenHash} LIMIT 1
-      `) as Array<{ tokenFamilyId: string }>;
-      const consumed = rows[0];
-      if (!consumed) return { replay: false, revokedCount: 0, audit: null };
+        FOR UPDATE
+      `) as Array<{ deviceSessionId: string; tokenFamilyId: string }>;
+      const consumedRow = rows[0];
+      if (!consumedRow) return { replay: false, revokedCount: 0, audit: null };
+      const ownerRows = (await tx.$queryRaw`
+        SELECT "tokenFamilyId" AS "ownerTokenFamilyId" FROM "DeviceSession"
+        WHERE "id" = ${consumedRow.deviceSessionId} LIMIT 1
+        FOR UPDATE
+      `) as Array<{ ownerTokenFamilyId: string }>;
+      const consumed = assertConsumedOwnerBinding({
+        deviceSessionId: consumedRow.deviceSessionId,
+        tokenFamilyId: consumedRow.tokenFamilyId,
+        ownerTokenFamilyId: ownerRows[0]?.ownerTokenFamilyId ?? null
+      });
       const updated = (await tx.$queryRaw`
         UPDATE "DeviceSession"
         SET "status" = 'revoked', "revokedAt" = ${fromEpochSeconds(now)}, "revokeReason" = 'refresh_replay'

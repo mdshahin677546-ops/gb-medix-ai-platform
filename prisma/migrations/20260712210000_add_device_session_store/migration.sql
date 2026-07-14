@@ -37,6 +37,7 @@ CREATE TABLE "ConsumedRefreshToken" (
 CREATE UNIQUE INDEX "DeviceSession_refreshTokenHash_key" ON "DeviceSession"("refreshTokenHash");
 -- tokenFamilyId is GLOBALLY unique: a token family belongs to exactly one session.
 CREATE UNIQUE INDEX "DeviceSession_tokenFamilyId_key" ON "DeviceSession"("tokenFamilyId");
+CREATE UNIQUE INDEX "DeviceSession_id_tokenFamilyId_key" ON "DeviceSession"("id", "tokenFamilyId");
 CREATE INDEX "DeviceSession_userId_idx" ON "DeviceSession"("userId");
 CREATE INDEX "DeviceSession_status_idx" ON "DeviceSession"("status");
 CREATE INDEX "DeviceSession_idleExpiresAt_idx" ON "DeviceSession"("idleExpiresAt");
@@ -51,7 +52,7 @@ CREATE INDEX "ConsumedRefreshToken_expiresAt_idx" ON "ConsumedRefreshToken"("exp
 
 -- AddForeignKey
 ALTER TABLE "DeviceSession" ADD CONSTRAINT "DeviceSession_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "ConsumedRefreshToken" ADD CONSTRAINT "ConsumedRefreshToken_deviceSessionId_fkey" FOREIGN KEY ("deviceSessionId") REFERENCES "DeviceSession"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ConsumedRefreshToken" ADD CONSTRAINT "ConsumedRefreshToken_deviceSessionId_tokenFamilyId_fkey" FOREIGN KEY ("deviceSessionId", "tokenFamilyId") REFERENCES "DeviceSession"("id", "tokenFamilyId") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddCheckConstraint: the database itself restricts status, counter range, hash
 -- format, and the time-boundary invariants (mirroring the pure-function foundation).

@@ -30,6 +30,10 @@ Two new models; no existing table/column is changed.
   `absoluteExpiresAt > createdAt`, `idleExpiresAt <= absoluteExpiresAt`
 - `ConsumedRefreshToken.consumedAt <= expiresAt`
 - Unique on each table's `refreshTokenHash`; FKs with `ON DELETE CASCADE`.
+- `DeviceSession` has a composite `UNIQUE(id, tokenFamilyId)`, and
+  `ConsumedRefreshToken(deviceSessionId, tokenFamilyId)` has a composite FK to
+  that pair. A consumed row can only point at the family owned by its
+  `deviceSessionId`.
 - The cross-table rule (`consumed.expiresAt <= owning session absoluteExpiresAt`)
   cannot be a plain CHECK; the transactional store derives `expiresAt` from the
   session's `absoluteExpiresAt`, so it is never later.
@@ -66,8 +70,11 @@ additive only and applies with `prisma migrate deploy` to a fresh database
 ## Replay / family revocation
 
 `classifyRefreshTokenHash` returns `current | consumed | unknown` (a `consumed`
-result carries only ids, never a hash). `revokeFamilyOnReplay` confirms the hash
-is consumed and revokes every active session in its family in ONE transaction
+result carries only ids, never a hash) only after joining the consumed row to its
+owning `DeviceSession` and confirming the two family ids match. A mismatched or
+orphaned consumed row fails closed. `revokeFamilyOnReplay` confirms the hash is
+consumed, locks the consumed row and owning session in ONE transaction, validates
+the same family binding, and revokes by the owning session's family id
 (TOCTOU-free), returning a minimal audit-ready result
 (`mobile_refresh_replay_detected`). Consumed history is retained until at least
 the owning session's absolute expiry so a replayed old token never degrades to
@@ -98,6 +105,11 @@ explicitly in sync; the store rejects rotation before overflow.
   before writing, so a consumed hash can never become current again. `classify`
   checks consumed first and fails closed on any cross-table duplicate — a "current"
   hit can never mask a replay.
+- **Consumed family binding.** Runtime replay handling never trusts
+  `ConsumedRefreshToken.tokenFamilyId` by itself. It validates the consumed row
+  against the owning `DeviceSession` and uses the owner's family as the
+  revocation authority. The composite FK rejects mismatched inserts at the
+  database layer.
 - **Persisted rows are validated on read.** `findById`, `findByRefreshTokenHash`,
   and `classifyRefreshTokenHash` re-validate every loaded row (hash format +
   structural invariants + reason allowlist); a corrupt row (e.g. a non-whole-second

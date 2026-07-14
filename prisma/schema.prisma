@@ -53,6 +53,7 @@ model DeviceSession {
   user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   consumedRefreshTokens ConsumedRefreshToken[]
 
+  @@unique([id, tokenFamilyId])
   @@index([userId])
   @@index([status])
   @@index([idleExpiresAt])
@@ -70,7 +71,7 @@ model ConsumedRefreshToken {
   refreshTokenHash String        @unique
   consumedAt       DateTime
   expiresAt        DateTime
-  deviceSession    DeviceSession @relation(fields: [deviceSessionId], references: [id], onDelete: Cascade)
+  deviceSession    DeviceSession @relation(fields: [deviceSessionId, tokenFamilyId], references: [id, tokenFamilyId], onDelete: Cascade)
 
   @@index([deviceSessionId])
   @@index([tokenFamilyId])
