@@ -8,28 +8,73 @@ datasource db {
 }
 
 model User {
-  id                String             @id @default(cuid())
-  email             String             @unique
-  status            String             @default("pending")
-  sessionVersion    Int                @default(1)
-  emailVerifiedAt   DateTime?
-  createdAt         DateTime           @default(now())
-  payments          PaymentRecord[]
-  tcmRecords        TCMRecord[]
-  rfqRecords        RFQRecord[]
-  assistantSessions AssistantSession[]
-  consultationOrders ConsultationOrder[]
-  entitlements      Entitlement[]
-  aiUsages          AIUsage[]
-  conversations     Conversation[]
-  aiReports         AIReport[]
+  id                     String                  @id @default(cuid())
+  email                  String                  @unique
+  status                 String                  @default("pending")
+  sessionVersion         Int                     @default(1)
+  emailVerifiedAt        DateTime?
+  createdAt              DateTime                @default(now())
+  payments               PaymentRecord[]
+  tcmRecords             TCMRecord[]
+  rfqRecords             RFQRecord[]
+  assistantSessions      AssistantSession[]
+  consultationOrders     ConsultationOrder[]
+  entitlements           Entitlement[]
+  aiUsages               AIUsage[]
+  conversations          Conversation[]
+  aiReports              AIReport[]
   productRecommendations ProductRecommendation[]
-  patientConsents   PatientConsent[]
-  emailVerifications EmailVerification[]
-  aiProcessingConsents AIProcessingConsent[]
+  patientConsents        PatientConsent[]
+  emailVerifications     EmailVerification[]
+  aiProcessingConsents   AIProcessingConsent[]
+  deviceSessions         DeviceSession[]
 
   @@index([status])
   @@index([createdAt])
+}
+
+// Batch 2.2B — Mobile device sessions (persistent, transactional refresh rotation).
+// Timestamps are stored as DateTime; the store maps them to/from epoch SECONDS and
+// re-validates every loaded row (a `number`/`DateTime` is NOT trusted at runtime).
+// DB CHECK constraints enforce the same invariants as the pure-function foundation.
+model DeviceSession {
+  id                    String                 @id @default(cuid())
+  userId                String
+  tokenFamilyId         String                 @unique
+  status                String                 @default("active")
+  rotationCounter       Int                    @default(0)
+  refreshTokenHash      String                 @unique
+  createdAt             DateTime
+  lastUsedAt            DateTime
+  idleExpiresAt         DateTime
+  absoluteExpiresAt     DateTime
+  revokedAt             DateTime?
+  revokeReason          String?
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  consumedRefreshTokens ConsumedRefreshToken[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([idleExpiresAt])
+  @@index([absoluteExpiresAt])
+  @@index([userId, status])
+}
+
+// Previously-rotated (consumed) refresh token hashes, retained for replay
+// detection until at least the owning session's absolute expiry. ONLY the hash is
+// stored — never a token, email, phone, header, cookie, pepper, or health data.
+model ConsumedRefreshToken {
+  id               String        @id @default(cuid())
+  deviceSessionId  String
+  tokenFamilyId    String
+  refreshTokenHash String        @unique
+  consumedAt       DateTime
+  expiresAt        DateTime
+  deviceSession    DeviceSession @relation(fields: [deviceSessionId], references: [id], onDelete: Cascade)
+
+  @@index([deviceSessionId])
+  @@index([tokenFamilyId])
+  @@index([expiresAt])
 }
 
 model Merchant {
@@ -44,17 +89,17 @@ model Merchant {
 }
 
 model Product {
-  id          String   @id @default(cuid())
-  merchantId  String
-  name        String
-  category    String
-  price       String
-  stock       String
-  imageUrl    String
-  description String
-  status      String   @default("active")
-  createdAt   DateTime @default(now())
-  merchant    Merchant @relation(fields: [merchantId], references: [id])
+  id              String                  @id @default(cuid())
+  merchantId      String
+  name            String
+  category        String
+  price           String
+  stock           String
+  imageUrl        String
+  description     String
+  status          String                  @default("active")
+  createdAt       DateTime                @default(now())
+  merchant        Merchant                @relation(fields: [merchantId], references: [id])
   recommendations ProductRecommendation[]
 
   @@index([merchantId])
@@ -63,13 +108,13 @@ model Product {
 }
 
 model TCMRecord {
-  id        String   @id @default(cuid())
+  id        String     @id @default(cuid())
   userId    String?
-  kind      String   @default("tcm_analysis")
+  kind      String     @default("tcm_analysis")
   input     String
   result    String
-  createdAt DateTime @default(now())
-  user      User?    @relation(fields: [userId], references: [id])
+  createdAt DateTime   @default(now())
+  user      User?      @relation(fields: [userId], references: [id])
   reports   AIReport[]
 
   @@index([userId])
@@ -77,20 +122,20 @@ model TCMRecord {
 }
 
 model PaymentRecord {
-  id          String   @id @default(cuid())
-  userId      String?
-  provider    String   @default("stripe")
-  product     String   @default("body_reset_plan")
-  sessionId   String?  @unique
+  id              String        @id @default(cuid())
+  userId          String?
+  provider        String        @default("stripe")
+  product         String        @default("body_reset_plan")
+  sessionId       String?       @unique
   paymentIntentId String?
-  resourceType String?
-  resourceId   String?
-  status      String
-  amountCents Int      @default(999)
-  currency    String   @default("usd")
-  createdAt   DateTime @default(now())
-  user        User?    @relation(fields: [userId], references: [id])
-  entitlements Entitlement[]
+  resourceType    String?
+  resourceId      String?
+  status          String
+  amountCents     Int           @default(999)
+  currency        String        @default("usd")
+  createdAt       DateTime      @default(now())
+  user            User?         @relation(fields: [userId], references: [id])
+  entitlements    Entitlement[]
 
   @@index([userId])
   @@index([product])
@@ -135,14 +180,14 @@ model AssistantSession {
 }
 
 model Doctor {
-  id        String              @id @default(cuid())
-  email     String              @unique
-  name      String
-  specialty String
-  status    String              @default("beta")
-  createdAt DateTime            @default(now())
-  orders    ConsultationOrder[]
-  verification DoctorVerification?
+  id              String              @id @default(cuid())
+  email           String              @unique
+  name            String
+  specialty       String
+  status          String              @default("beta")
+  createdAt       DateTime            @default(now())
+  orders          ConsultationOrder[]
+  verification    DoctorVerification?
   patientConsents PatientConsent[]
 }
 
@@ -165,17 +210,17 @@ model ConsultationOrder {
 }
 
 model Entitlement {
-  id        String    @id @default(cuid())
-  userId    String
-  productId String
-  paymentId String
+  id           String        @id @default(cuid())
+  userId       String
+  productId    String
+  paymentId    String
   resourceType String?
   resourceId   String?
-  status    String    @default("active")
-  expiresAt DateTime?
-  createdAt DateTime  @default(now())
-  user      User      @relation(fields: [userId], references: [id])
-  payment   PaymentRecord @relation(fields: [paymentId], references: [id])
+  status       String        @default("active")
+  expiresAt    DateTime?
+  createdAt    DateTime      @default(now())
+  user         User          @relation(fields: [userId], references: [id])
+  payment      PaymentRecord @relation(fields: [paymentId], references: [id])
 
   @@unique([paymentId, productId])
   @@index([userId])
@@ -280,22 +325,22 @@ model Message {
 }
 
 model AIReport {
-  id                 String    @id @default(cuid())
-  userId             String
-  assessmentId       String?
-  type               String    @default("health_assessment")
-  status             String    @default("completed")
-  score              Int
-  summary            String
-  analysis           Json      @db.JsonB
-  recommendations    Json      @db.JsonB
-  lifestylePlan      Json      @db.JsonB
-  productSuggestions Json      @db.JsonB
-  followUpPlan       Json      @db.JsonB
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  user               User      @relation(fields: [userId], references: [id])
-  assessment         TCMRecord? @relation(fields: [assessmentId], references: [id])
+  id                     String                  @id @default(cuid())
+  userId                 String
+  assessmentId           String?
+  type                   String                  @default("health_assessment")
+  status                 String                  @default("completed")
+  score                  Int
+  summary                String
+  analysis               Json                    @db.JsonB
+  recommendations        Json                    @db.JsonB
+  lifestylePlan          Json                    @db.JsonB
+  productSuggestions     Json                    @db.JsonB
+  followUpPlan           Json                    @db.JsonB
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  user                   User                    @relation(fields: [userId], references: [id])
+  assessment             TCMRecord?              @relation(fields: [assessmentId], references: [id])
   productRecommendations ProductRecommendation[]
 
   @@unique([userId, assessmentId, type])
