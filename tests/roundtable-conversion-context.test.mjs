@@ -88,19 +88,75 @@ test("buildConsultHref attaches education marker even with no params, and honors
   assert.equal(href, "/zh/consult?context=education");
 });
 
-// ---------- swapLocaleInPath: preserve query + filters ----------
-test("swapLocaleInPath swaps only the locale segment and preserves query + filters", () => {
+// ---------- swapLocaleInPath: locale swap + route-aware query safety ----------
+test("swapLocaleInPath swaps only the locale segment; roundtable filters preserved", () => {
   assert.equal(
     lp.swapLocaleInPath("/en/roundtable", "?query=sleep&sort=latest&category=chronic", "zh"),
     "/zh/roundtable?query=sleep&sort=latest&category=chronic"
   );
   assert.equal(lp.swapLocaleInPath("/en", "", "zh"), "/zh");
   assert.equal(lp.swapLocaleInPath("/zh/roundtable/adult-sleep-quality", "", "en"), "/en/roundtable/adult-sleep-quality");
-  assert.equal(lp.swapLocaleInPath("/zh", "?query=x", "en"), "/en?query=x");
   // search without a leading "?" is normalized
-  assert.equal(lp.swapLocaleInPath("/en/products", "sort=popular", "zh"), "/zh/products?sort=popular");
+  assert.equal(lp.swapLocaleInPath("/en/roundtable", "query=sleep", "zh"), "/zh/roundtable?query=sleep");
   // empty "?" is treated as no query
   assert.equal(lp.swapLocaleInPath("/en/services", "?", "zh"), "/zh/services");
+});
+
+test("swapLocaleInPath drops query on non-roundtable/non-consult routes (safe default)", () => {
+  // home / products / services carry no preserved query state
+  assert.equal(lp.swapLocaleInPath("/zh", "?query=x", "en"), "/en");
+  assert.equal(lp.swapLocaleInPath("/en/products", "?sort=popular&email=a%40b.com", "zh"), "/zh/products");
+  assert.equal(lp.swapLocaleInPath("/en/services", "?ref=x", "zh"), "/zh/services");
+});
+
+test("swapLocaleInPath: roundtable route keeps ONLY safe filters, drops PHI mixed in", () => {
+  const out = lp.swapLocaleInPath(
+    "/en/roundtable",
+    "?query=sleep&category=chronic&sort=latest&email=a%40b.com&token=secret&symptom=cough&prompt=full",
+    "zh"
+  );
+  assert.equal(out, "/zh/roundtable?query=sleep&category=chronic&sort=latest");
+  const url = new URL(out, "http://x");
+  for (const bad of ["email", "token", "symptom", "prompt"]) assert.equal(url.searchParams.has(bad), false, `leaked ${bad}`);
+});
+
+const PHI = ["email", "phone", "mobile", "token", "cookie", "authorization", "auth", "symptom", "symptomText", "freeText", "prompt", "patientName", "dob", "ssn", "mrn", "note"];
+
+test("swapLocaleInPath: /consult drops all PHI/unsafe query, keeps only consult allowlist", () => {
+  // Codex-reported bad case: PHI must NOT survive the locale switch on /consult.
+  const out = lp.swapLocaleInPath(
+    "/en/consult",
+    "?context=education&email=a%40b.com&token=secret&symptom=chest+pain",
+    "zh"
+  );
+  const url = new URL(out, "http://x");
+  assert.equal(url.pathname, "/zh/consult");
+  assert.equal(url.searchParams.get("context"), "education");
+  for (const bad of PHI) assert.equal(url.searchParams.has(bad), false, `PHI leaked on /consult: ${bad}`);
+
+  // safe source/topic/context survive when valid
+  const safe = lp.swapLocaleInPath(
+    "/en/consult",
+    "?source=roundtable_card&topic=chronic&context=education&authorization=Bearer%20x&phone=15551234567",
+    "zh"
+  );
+  const su = new URL(safe, "http://x");
+  assert.equal(su.searchParams.get("source"), "roundtable_card");
+  assert.equal(su.searchParams.get("topic"), "chronic");
+  assert.equal(su.searchParams.get("context"), "education");
+  for (const bad of PHI) assert.equal(su.searchParams.has(bad), false, `PHI leaked: ${bad}`);
+});
+
+test("swapLocaleInPath: /ai-consult drops PHI/full-prompt, keeps safe source", () => {
+  const out = lp.swapLocaleInPath(
+    "/en/ai-consult",
+    "?source=nav&prompt=full+text&patientName=Jane&cookie=sid&freeText=x&mrn=99",
+    "zh"
+  );
+  const url = new URL(out, "http://x");
+  assert.equal(url.pathname, "/zh/ai-consult");
+  assert.equal(url.searchParams.get("source"), "nav");
+  for (const bad of PHI) assert.equal(url.searchParams.has(bad), false, `PHI leaked on /ai-consult: ${bad}`);
 });
 
 // ---------- consultMetadata: consult-specific, non-diagnostic, no regression ----------

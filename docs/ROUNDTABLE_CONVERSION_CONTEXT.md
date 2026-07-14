@@ -27,9 +27,15 @@ medical diagnosis / prescription / individual-risk logic**.
    they are not on the allowlist. `sanitizeConsultParams()` is the single authority
    and is covered by real-behavior tests (`tests/roundtable-conversion-context.test.mjs`).
 
-3. **Language switch preserves context.** `swapLocaleInPath(pathname, search, nextLang)`
-   swaps only the leading locale segment and preserves the full query string (search +
-   active filters), so switching language never drops roundtable search/filter state.
+3. **Language switch preserves context — route-aware and privacy-safe.**
+   `swapLocaleInPath(pathname, search, nextLang)` swaps only the leading locale segment
+   and sanitizes the preserved query per route (it never carries the raw query blindly):
+   - `/consult` and `/ai-consult`: only the consultation allowlist survives, reusing
+     `sanitizeConsultParams` (source / topic / context=education). PHI, symptoms, full
+     prompt, email, phone, token, cookie, and Authorization are dropped.
+   - `/roundtable` (list/detail): only safe search/filter state (`query` / `category` /
+     `sort`, see `ROUNDTABLE_QUERY_ALLOWLIST`); any other keys are dropped.
+   - any other route: the query is dropped entirely (safe default).
 
 ## Safety positioning (unchanged)
 
