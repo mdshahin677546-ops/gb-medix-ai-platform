@@ -159,6 +159,59 @@ test("swapLocaleInPath: /ai-consult drops PHI/full-prompt, keeps safe source", (
   for (const bad of PHI) assert.equal(url.searchParams.has(bad), false, `PHI leaked on /ai-consult: ${bad}`);
 });
 
+// ---------- mandated exact spec cases (route-aware locale query allowlists) ----------
+test("mandated spec cases produce the exact required URLs", () => {
+  const cases = [
+    ["/en/roundtable", "?query=sleep&category=chronic&sort=latest", "zh", "/zh/roundtable?query=sleep&category=chronic&sort=latest"],
+    ["/en/roundtable", "?query=sleep&token=x&email=a%40b.com", "zh", "/zh/roundtable?query=sleep"],
+    ["/en/consult", "?source=roundtable_card&topic=sleep&context=education", "zh", "/zh/consult?source=roundtable_card&topic=sleep&context=education"],
+    ["/en/consult", "?context=education&email=a%40b.com&token=secret&symptom=chest+pain", "zh", "/zh/consult?context=education"],
+    ["/en/ai-consult", "?source=roundtable_card&topic=sleep&freeText=private", "zh", "/zh/ai-consult?source=roundtable_card&topic=sleep"],
+    ["/en/products", "?sort=popular&token=x", "zh", "/zh/products"]
+  ];
+  for (const [path, search, next, expected] of cases) {
+    assert.equal(lp.swapLocaleInPath(path, search, next), expected, `${path}${search}`);
+  }
+});
+
+test("case-variant sensitive keys are dropped (allowlist is not case-permissive)", () => {
+  const consult = lp.swapLocaleInPath("/en/consult", "?context=education&Email=a%40b.com&TOKEN=x&Authorization=Bearer+y&SymptomText=z&Cookie=sid", "zh");
+  assert.equal(consult, "/zh/consult?context=education");
+  const round = lp.swapLocaleInPath("/en/roundtable", "?query=sleep&Email=a%40b.com&TOKEN=x&Symptom=cough", "zh");
+  assert.equal(round, "/zh/roundtable?query=sleep");
+});
+
+test("duplicate query keys cannot smuggle sensitive data past the allowlist", () => {
+  const round = lp.swapLocaleInPath("/en/roundtable", "?query=sleep&email=a%40b.com&email=b%40c.com", "zh");
+  assert.equal(round, "/zh/roundtable?query=sleep");
+  const consult = lp.swapLocaleInPath("/en/consult", "?context=education&token=a&token=b&email=x&email=y", "zh");
+  const cu = new URL(consult, "http://x");
+  assert.equal(cu.searchParams.get("context"), "education");
+  assert.equal(cu.searchParams.has("token"), false);
+  assert.equal(cu.searchParams.has("email"), false);
+});
+
+test("url-encoded sensitive values never leak (the whole key is dropped)", () => {
+  const out = lp.swapLocaleInPath("/en/consult", "?context=education&email=a%40b.com&note=chest%20pain%20since%203am", "zh");
+  assert.equal(out, "/zh/consult?context=education");
+  assert.equal(out.includes("%40"), false);
+  assert.equal(out.toLowerCase().includes("chest"), false);
+});
+
+test("no open redirect / protocol injection: output is always an in-site relative path", () => {
+  // a URL-like value on a preserved roundtable filter stays a query VALUE, never the path
+  const r = lp.swapLocaleInPath("/en/roundtable", "?query=" + encodeURIComponent("http://evil.com"), "zh");
+  assert.ok(r.startsWith("/zh/roundtable"), r);
+  assert.equal(new URL(r, "http://in-site.test").host, "in-site.test");
+  // a malicious/absolute pathname collapses to a safe in-site locale root
+  for (const bad of ["http://evil.com/x", "//evil.com/x", "javascript:alert(1)"]) {
+    const out = lp.swapLocaleInPath(bad, "", "zh");
+    assert.ok(out.startsWith("/zh"), `${bad} -> ${out}`);
+    assert.equal(out.toLowerCase().includes("evil"), false);
+    assert.equal(out.toLowerCase().includes("javascript:"), false);
+  }
+});
+
 // ---------- consultMetadata: consult-specific, non-diagnostic, no regression ----------
 test("consultMetadata is consultation-specific, non-diagnostic, and distinct from other pages", () => {
   const en = i18n.getFunnelCopy("en");
