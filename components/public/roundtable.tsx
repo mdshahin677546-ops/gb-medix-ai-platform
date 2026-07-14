@@ -3,10 +3,12 @@ import type { FunnelCopy } from "@/lib/public-funnel/i18n";
 import type { RoundtableCardModel, ConsensusItem, Disagreement, ClaimEvidence } from "@/lib/public-funnel/types";
 import { Card, Badge, ButtonLink, DemoBadge } from "./ui";
 import { ReviewStatusBadge, VersionBadge, EvidenceStatusBadge, EvidenceLevelBadge, PerspectiveBadge, RiskTierBadge } from "./medical";
+import { buildConsultHref } from "@/lib/public-funnel/consult-context";
 
-export function ConsultationCTA({ lang, copy, variant = "primary", label, source }: { lang: Lang; copy: FunnelCopy; variant?: "primary" | "secondary"; label?: string; source?: "roundtable" | "service" }) {
+export function ConsultationCTA({ lang, copy, variant = "primary", label, source, topic }: { lang: Lang; copy: FunnelCopy; variant?: "primary" | "secondary"; label?: string; source?: "roundtable" | "service"; topic?: string }) {
+  const href = buildConsultHref(lang, { source: source === "service" ? "service" : "roundtable_detail", topic });
   return (
-    <ButtonLink href={`/${lang}/consult`} variant={variant} onClickEventName={source === "service" ? "service_to_consult_click" : "roundtable_to_consult_click"}>
+    <ButtonLink href={href} variant={variant} onClickEventName={source === "service" ? "service_to_consult_click" : "roundtable_to_consult_click"}>
       {label ?? copy.detail.ctaEnd}
     </ButtonLink>
   );
@@ -111,7 +113,7 @@ export function RoundtableCard({ lang, copy, card, featured = false }: { lang: L
       <div className="mt-2"><RiskTierBadge tier={card.topRiskTier} copy={copy} /></div>
       <div className="mt-4 flex flex-wrap gap-2">
         <ButtonLink href={`/${lang}/roundtable/${card.slug}`} variant="secondary" className="px-4 py-2 text-xs">{copy.card.viewRoundtable}</ButtonLink>
-        <ButtonLink href={`/${lang}/consult`} variant="ghost" className="px-4 py-2 text-xs" onClickEventName="roundtable_to_consult_click">{copy.card.startConsult}</ButtonLink>
+        <ButtonLink href={buildConsultHref(lang, { source: "roundtable_card", topic: card.category })} variant="ghost" className="px-4 py-2 text-xs" onClickEventName="roundtable_to_consult_click">{copy.card.startConsult}</ButtonLink>
       </div>
     </article>
   );

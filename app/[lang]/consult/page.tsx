@@ -1,6 +1,13 @@
+import type { Metadata } from "next";
 import { Shell } from "@/components/Shell";
 import { getLang } from "@/lib/lang";
+import { getFunnelCopy } from "@/lib/public-funnel/i18n";
+import { consultMetadata } from "@/lib/public-funnel/consult-context";
 import { ConsultRoom } from "./consult-room";
+
+export function generateMetadata({ params }: { params: { lang: string } }): Metadata {
+  return consultMetadata(getFunnelCopy(getLang(params.lang)));
+}
 
 export default function ConsultPage({ params }: { params: { lang: string } }) {
   const lang = getLang(params.lang);
