@@ -1,6 +1,6 @@
 import { toNextResponse } from "@/lib/api-v1/http";
 import { prepareMobileAuthRequest } from "@/lib/api-v1/mobile-auth-boundary";
-import { runMobileLogoutAll } from "@/lib/api-v1/mobile-session";
+import { finalizeMobileAuthBoundaryRejection, runMobileLogoutAll } from "@/lib/api-v1/mobile-session";
 
 /**
  * POST /api/v1/mobile/auth/logout-all — revoke ALL device sessions for the acting
@@ -9,7 +9,7 @@ import { runMobileLogoutAll } from "@/lib/api-v1/mobile-session";
  */
 export async function POST(req: Request) {
   const prepared = await prepareMobileAuthRequest(req, "logout-all");
-  if (!prepared.ok) return toNextResponse(prepared.result);
+  if (!prepared.ok) return toNextResponse(await finalizeMobileAuthBoundaryRejection(prepared.rejection));
   return toNextResponse(
     await runMobileLogoutAll({
       body: prepared.input.body,

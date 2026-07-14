@@ -77,6 +77,14 @@ export function createMobileLogoutHandler(deps: MobileLogoutDeps) {
 
       if (deps.security && input.idempotencyKey) {
         const subjectDigest = deps.security.credentialDigest(presentedHash);
+        // Rate limit FIRST (B22D-P1-001): a denied request must NEVER claim or
+        // complete an idempotency record, so a same-key retry can never replay as
+        // a false success. checkRateLimit persists its own mobile_auth_rate_limited
+        // audit on denial, and no revoke side effect runs on a 429.
+        const limited = await deps.security.checkRateLimit({ endpoint: "logout", subjectDigest, now });
+        if (!limited.ok) {
+          return finalize(requestId, failure("RATE_LIMITED", requestId), { retryAfterSeconds: limited.retryAfterSeconds });
+        }
         const claim = await deps.security.claimIdempotency({
           endpoint: "logout",
           rawKey: input.idempotencyKey,
@@ -88,13 +96,6 @@ export function createMobileLogoutHandler(deps: MobileLogoutDeps) {
         if (claim.status === "conflict") return finalize(requestId, failure("CONFLICT", requestId));
         if (claim.status === "completed") return finalize(requestId, success({ acknowledged: true }, requestId));
         idempotencyRecordId = claim.id;
-        const limited = await deps.security.checkRateLimit({ endpoint: "logout", subjectDigest, now });
-        if (!limited.ok) {
-          await deps.security.completeIdempotency(idempotencyRecordId, now);
-          return finalize(requestId, failure("RATE_LIMITED", requestId), {
-            "Retry-After": String(limited.retryAfterSeconds)
-          });
-        }
       }
       const current = await deps.findCurrentByHash(presentedHash);
 

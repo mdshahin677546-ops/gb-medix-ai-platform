@@ -46,6 +46,8 @@ CREATE TABLE "MobileAuthAuditLog" (
     "userId" TEXT,
     "deviceSessionId" TEXT,
     "tokenFamilyId" TEXT,
+    "endpoint" TEXT,
+    "requestId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "MobileAuthAuditLog_pkey" PRIMARY KEY ("id")
@@ -69,6 +71,8 @@ CREATE INDEX "MobileAuthAuditLog_occurredAt_idx" ON "MobileAuthAuditLog"("occurr
 CREATE INDEX "MobileAuthAuditLog_userId_idx" ON "MobileAuthAuditLog"("userId");
 CREATE INDEX "MobileAuthAuditLog_deviceSessionId_idx" ON "MobileAuthAuditLog"("deviceSessionId");
 CREATE INDEX "MobileAuthAuditLog_tokenFamilyId_idx" ON "MobileAuthAuditLog"("tokenFamilyId");
+CREATE INDEX "MobileAuthAuditLog_endpoint_idx" ON "MobileAuthAuditLog"("endpoint");
+CREATE INDEX "MobileAuthAuditLog_requestId_idx" ON "MobileAuthAuditLog"("requestId");
 
 ALTER TABLE "MobileAuthRateLimitBucket" ADD CONSTRAINT "MobileAuthRateLimitBucket_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
@@ -93,23 +97,43 @@ ALTER TABLE "MobileAuthIdempotencyRecord" ADD CONSTRAINT "MobileAuthIdempotencyR
 );
 
 ALTER TABLE "MobileAuthAuditLog" ADD CONSTRAINT "MobileAuthAuditLog_event_check" CHECK ("event" IN (
+  'mobile_session_created',
+  'mobile_access_token_issued',
   'mobile_auth_rate_limited',
   'mobile_auth_idempotency_conflict',
   'mobile_refresh_rotated',
   'mobile_refresh_replay_detected',
   'mobile_session_revoked',
   'mobile_all_sessions_revoked',
-  'mobile_auth_boundary_rejected'
+  'mobile_auth_boundary_rejected',
+  'mobile_session_expired',
+  'mobile_session_compromised'
 ));
 ALTER TABLE "MobileAuthAuditLog" ADD CONSTRAINT "MobileAuthAuditLog_reason_check" CHECK ("reason" IS NULL OR "reason" IN (
+  'created',
+  'issued',
   'rate_limited',
   'idempotency_conflict',
   'rotated',
   'replay_detected',
   'user_logout',
   'user_logout_all',
-  'boundary_rejected',
+  'query_rejected',
+  'content_type_rejected',
+  'header_rejected',
+  'idempotency_key_rejected',
+  'body_too_large',
+  'body_decode_failed',
+  'malformed_json',
+  'body_schema_rejected',
   'validation_failed',
-  'internal_error'
+  'internal_error',
+  'session_version_mismatch',
+  'token_family_revoked',
+  'expired',
+  'compromised',
+  'admin'
 ));
 ALTER TABLE "MobileAuthAuditLog" ADD CONSTRAINT "MobileAuthAuditLog_outcome_check" CHECK ("outcome" IN ('success', 'denied', 'conflict', 'rate_limited', 'internal_error'));
+ALTER TABLE "MobileAuthAuditLog" ADD CONSTRAINT "MobileAuthAuditLog_endpoint_check" CHECK ("endpoint" IS NULL OR "endpoint" IN ('refresh', 'logout', 'logout-all'));
+ALTER TABLE "MobileAuthAuditLog" ADD CONSTRAINT "MobileAuthAuditLog_requestId_check" CHECK ("requestId" IS NULL OR "requestId" ~ '^[A-Za-z0-9._:-]{1,128}$');

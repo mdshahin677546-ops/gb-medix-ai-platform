@@ -126,9 +126,9 @@ test("migration added security-control tables and constraints", async () => {
   );
   assert.equal(tables.length, 3);
   const checks = await prisma.$queryRawUnsafe(
-    `SELECT conname FROM pg_constraint WHERE conname IN ('MobileAuthRateLimitBucket_count_check','MobileAuthIdempotencyRecord_status_check','MobileAuthAuditLog_event_check')`
+    `SELECT conname FROM pg_constraint WHERE conname IN ('MobileAuthRateLimitBucket_count_check','MobileAuthIdempotencyRecord_status_check','MobileAuthAuditLog_event_check','MobileAuthAuditLog_endpoint_check','MobileAuthAuditLog_requestId_check')`
   );
-  assert.equal(checks.length, 3);
+  assert.equal(checks.length, 5);
 });
 
 test("idempotency binds key to endpoint/actor/credential/body and supports completed replay", async () => {
@@ -229,6 +229,41 @@ test("valid transactional rotate writes audit and completed idempotency atomical
   assert.equal(await prisma.mobileAuthAuditLog.count({ where: { deviceSessionId: session.id, event: "mobile_refresh_rotated" } }), 1);
   const idem = await prisma.mobileAuthIdempotencyRecord.findUnique({ where: { id: claim.id } });
   assert.equal(idem.status, "completed");
+});
+
+test("boundary audit persists fixed endpoint, reason, and requestId only", async () => {
+  const requestId = `req-${randomBytes(6).toString("hex")}`;
+  await M.persistMobileAuthBoundaryAudit(prisma, {
+    endpoint: "refresh",
+    requestId,
+    reason: "query_rejected",
+    occurredAt: BASE + 40
+  });
+  const rows = await prisma.$queryRaw`
+    SELECT "event", "endpoint", "requestId", "reason", "outcome"
+    FROM "MobileAuthAuditLog"
+    WHERE "requestId" = ${requestId}
+  `;
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0], {
+    event: "mobile_auth_boundary_rejected",
+    endpoint: "refresh",
+    requestId,
+    reason: "query_rejected",
+    outcome: "denied"
+  });
+  await assert.rejects(() => M.persistMobileAuthBoundaryAudit(prisma, {
+    endpoint: "refresh",
+    requestId: `bad-${randomBytes(3).toString("hex")}`,
+    reason: "boundary_rejected",
+    occurredAt: BASE + 41
+  }));
+  await assert.rejects(() => prisma.$executeRaw`
+    INSERT INTO "MobileAuthAuditLog"
+      ("id", "event", "reason", "outcome", "occurredAt", "endpoint", "requestId")
+    VALUES
+      (${rid("audit")}, 'mobile_auth_boundary_rejected', 'query_rejected', 'denied', ${new Date((BASE + 42) * 1000)}, 'refresh', ${"bad\r\nrequest"})
+  `);
 });
 
 test("audit tables do not contain forbidden token/header/body columns", async () => {

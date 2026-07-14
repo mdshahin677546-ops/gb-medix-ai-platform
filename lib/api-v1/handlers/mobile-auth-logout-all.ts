@@ -97,6 +97,19 @@ export function createMobileLogoutAllHandler(deps: MobileLogoutAllDeps) {
       if (deps.security && input.idempotencyKey) {
         const actor = deps.security.actorDigest(bearer.claims.sub);
         const credential = deps.security.credentialDigest(`${bearer.claims.sub}:${bearer.claims.sid}:${bearer.claims.sv}`);
+        // Rate limit FIRST (B22D-P1-001): a denied request must NEVER claim or
+        // complete an idempotency record, so a same-key retry can never replay as a
+        // false success. checkRateLimit persists its own rate-limit audit; no
+        // revoke side effect runs on a 429.
+        const limited = await deps.security.checkRateLimit({
+          endpoint: "logout-all",
+          subjectDigest: actor,
+          now,
+          userId: bearer.claims.sub
+        });
+        if (!limited.ok) {
+          return finalize(requestId, failure("RATE_LIMITED", requestId), { retryAfterSeconds: limited.retryAfterSeconds });
+        }
         const claim = await deps.security.claimIdempotency({
           endpoint: "logout-all",
           rawKey: input.idempotencyKey,
@@ -108,18 +121,6 @@ export function createMobileLogoutAllHandler(deps: MobileLogoutAllDeps) {
         if (claim.status === "conflict") return finalize(requestId, failure("CONFLICT", requestId));
         if (claim.status === "completed") return finalize(requestId, success({ acknowledged: true }, requestId));
         idempotencyRecordId = claim.id;
-        const limited = await deps.security.checkRateLimit({
-          endpoint: "logout-all",
-          subjectDigest: actor,
-          now,
-          userId: bearer.claims.sub
-        });
-        if (!limited.ok) {
-          await deps.security.completeIdempotency(idempotencyRecordId, now);
-          return finalize(requestId, failure("RATE_LIMITED", requestId), {
-            "Retry-After": String(limited.retryAfterSeconds)
-          });
-        }
       }
 
       // 4. Revoke every session owned by the verified actor only.

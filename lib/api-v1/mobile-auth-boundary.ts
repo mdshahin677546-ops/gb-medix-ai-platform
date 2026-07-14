@@ -11,6 +11,23 @@ import {
   parseIdempotencyKey
 } from "../mobile-auth/v1/security-controls";
 
+export type MobileAuthBoundaryRejectReason =
+  | "query_rejected"
+  | "content_type_rejected"
+  | "header_rejected"
+  | "idempotency_key_rejected"
+  | "body_too_large"
+  | "body_decode_failed"
+  | "malformed_json"
+  | "body_schema_rejected";
+
+export type MobileAuthBoundaryRejection = {
+  endpoint: MobileAuthEndpoint;
+  requestId: string;
+  reason: MobileAuthBoundaryRejectReason;
+  result: HandlerResult;
+};
+
 const MAX_JSON_BYTES = 8192;
 const JSON_CONTENT_TYPE_RE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
 const FORBIDDEN_BODY_KEYS = new Set([
@@ -41,11 +58,22 @@ export type PreparedMobileAuthRequest =
         idempotencyKey: string;
       };
     }
-  | { ok: false; result: HandlerResult };
+  | { ok: false; rejection: MobileAuthBoundaryRejection };
 
-function boundaryFailure(): PreparedMobileAuthRequest {
+function boundaryFailure(
+  endpoint: MobileAuthEndpoint,
+  reason: MobileAuthBoundaryRejectReason
+): PreparedMobileAuthRequest {
   const requestId = newRequestId();
-  return { ok: false, result: finalize(requestId, failure("VALIDATION_ERROR", requestId)) };
+  return {
+    ok: false,
+    rejection: {
+      endpoint,
+      requestId,
+      reason,
+      result: finalize(requestId, failure("VALIDATION_ERROR", requestId))
+    }
+  };
 }
 
 function isAmbiguousHeaderValue(value: string): boolean {
@@ -58,7 +86,9 @@ function singletonHeader(headers: Headers, name: string): string | undefined {
   return value;
 }
 
-async function readBodyText(request: Request): Promise<{ ok: true; text: string } | { ok: false }> {
+async function readBodyText(
+  request: Request
+): Promise<{ ok: true; text: string } | { ok: false; reason: "body_too_large" | "body_decode_failed" }> {
   if (!request.body) return { ok: true, text: "" };
   const reader = request.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -71,14 +101,14 @@ async function readBodyText(request: Request): Promise<{ ok: true; text: string 
       total += value.byteLength;
       if (total > MAX_JSON_BYTES) {
         await reader.cancel().catch(() => undefined);
-        return { ok: false };
+        return { ok: false, reason: "body_too_large" };
       }
       text += decoder.decode(value, { stream: true });
     }
     text += decoder.decode();
     return { ok: true, text };
   } catch {
-    return { ok: false };
+    return { ok: false, reason: "body_decode_failed" };
   }
 }
 
@@ -109,31 +139,34 @@ export async function prepareMobileAuthRequest(
   endpoint: MobileAuthEndpoint
 ): Promise<PreparedMobileAuthRequest> {
   const url = new URL(request.url);
-  if (url.search.length > 0) return boundaryFailure();
+  if (url.search.length > 0) return boundaryFailure(endpoint, "query_rejected");
 
   const contentType = request.headers.get("content-type");
   if (!contentType || contentType.includes(",") || !JSON_CONTENT_TYPE_RE.test(contentType.trim())) {
-    return boundaryFailure();
+    return boundaryFailure(endpoint, "content_type_rejected");
   }
 
   const authorization = singletonHeader(request.headers, "authorization");
   const idempotencyHeader = singletonHeader(request.headers, "idempotency-key");
-  if (authorization === "__ambiguous__" || idempotencyHeader === "__ambiguous__") return boundaryFailure();
+  if (authorization === "__ambiguous__" || idempotencyHeader === "__ambiguous__") {
+    return boundaryFailure(endpoint, "header_rejected");
+  }
   const idempotency = parseIdempotencyKey(idempotencyHeader);
-  if (!idempotency.ok) return boundaryFailure();
+  if (!idempotency.ok) return boundaryFailure(endpoint, "idempotency_key_rejected");
 
   const bodyText = await readBodyText(request);
-  if (!bodyText.ok || bodyText.text.length === 0) return boundaryFailure();
+  if (!bodyText.ok) return boundaryFailure(endpoint, bodyText.reason);
+  if (bodyText.text.length === 0) return boundaryFailure(endpoint, "body_schema_rejected");
 
   let raw: unknown;
   try {
     raw = JSON.parse(bodyText.text);
   } catch {
-    return boundaryFailure();
+    return boundaryFailure(endpoint, "malformed_json");
   }
 
   const body = parseEndpointBody(endpoint, raw);
-  if (!body) return boundaryFailure();
+  if (!body) return boundaryFailure(endpoint, "body_schema_rejected");
 
   return {
     ok: true,

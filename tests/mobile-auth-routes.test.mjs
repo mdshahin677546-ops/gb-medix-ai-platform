@@ -196,6 +196,33 @@ async function seedSession(store, token, over = {}) {
   });
 }
 
+function makeSecuritySpy({ limited = false, throwRateLimit = false, claimStatus = { status: "claimed", id: "idem-1" } } = {}) {
+  const calls = { rateLimit: 0, claim: 0, complete: 0, fail: 0 };
+  return {
+    calls,
+    security: {
+      credentialDigest: (value) => `cred:${value}`,
+      actorDigest: (value) => `actor:${value}`,
+      requestDigest: (endpoint, body) => `request:${endpoint}:${JSON.stringify(body)}`,
+      checkRateLimit: async () => {
+        calls.rateLimit += 1;
+        if (throwRateLimit) throw new Error("rate-limit unavailable");
+        return limited ? { ok: false, retryAfterSeconds: 17 } : { ok: true, remaining: 1 };
+      },
+      claimIdempotency: async () => {
+        calls.claim += 1;
+        return claimStatus;
+      },
+      completeIdempotency: async () => {
+        calls.complete += 1;
+      },
+      failIdempotency: async () => {
+        calls.fail += 1;
+      }
+    }
+  };
+}
+
 // ---------- refresh ----------
 test("refresh success rotates exactly once and returns a NEW refresh token (plaintext once)", async () => {
   const h = makeHarness();
@@ -273,6 +300,60 @@ test("logout revokes only the owning session and is idempotent + non-revealing",
   assert.deepEqual(Object.keys(unknown.body.data), Object.keys(res.body.data));
 });
 
+test("B22D-P1-001 rate-limited logout does not claim, complete, revoke, or replay false success", async () => {
+  const token = rt.generateRefreshToken();
+  const spy = makeSecuritySpy({ limited: true });
+  const h = makeHarness({ deps: { security: spy.security } });
+  await seedSession(h.store, token, { id: "rate-logout", fam: "rate-fam" });
+  const handler = logoutH.createMobileLogoutHandler(h.deps);
+
+  const first = await handler({ body: { refreshToken: token }, idempotencyKey: "idem_rate_logout_0001" });
+  const replay = await handler({ body: { refreshToken: token }, idempotencyKey: "idem_rate_logout_0001" });
+
+  assert.equal(first.status, 429);
+  assert.equal(replay.status, 429);
+  assert.equal(first.headers["Retry-After"], "17");
+  assert.equal(spy.calls.rateLimit, 2);
+  assert.equal(spy.calls.claim, 0);
+  assert.equal(spy.calls.complete, 0);
+  assert.equal(spy.calls.fail, 0);
+  assert.equal((await h.store.findById("rate-logout")).status, "active");
+});
+
+test("B22D-P1-001 logout limiter exception happens before claim and revoke", async () => {
+  const token = rt.generateRefreshToken();
+  const spy = makeSecuritySpy({ throwRateLimit: true });
+  const h = makeHarness({ deps: { security: spy.security } });
+  await seedSession(h.store, token, { id: "limit-error-logout", fam: "limit-error-fam" });
+  const handler = logoutH.createMobileLogoutHandler(h.deps);
+
+  const res = await handler({ body: { refreshToken: token }, idempotencyKey: "idem_rate_logout_0002" });
+
+  assert.equal(res.status, 500);
+  assert.equal(spy.calls.rateLimit, 1);
+  assert.equal(spy.calls.claim, 0);
+  assert.equal(spy.calls.complete, 0);
+  assert.equal(spy.calls.fail, 0);
+  assert.equal((await h.store.findById("limit-error-logout")).status, "active");
+});
+
+test("B22D-P1-001 rate-limited logout 2/10/50 workers have no false 200 replay", async () => {
+  for (const workers of [2, 10, 50]) {
+    const token = rt.generateRefreshToken();
+    const spy = makeSecuritySpy({ limited: true });
+    const h = makeHarness({ deps: { security: spy.security } });
+    await seedSession(h.store, token, { id: `rate-workers-${workers}`, fam: `rate-fam-${workers}` });
+    const handler = logoutH.createMobileLogoutHandler(h.deps);
+    const results = await Promise.all(Array.from({ length: workers }, () =>
+      handler({ body: { refreshToken: token }, idempotencyKey: "idem_rate_logout_workers" })
+    ));
+    assert.deepEqual(results.map((r) => r.status), Array(workers).fill(429));
+    assert.equal(spy.calls.claim, 0);
+    assert.equal(spy.calls.complete, 0);
+    assert.equal((await h.store.findById(`rate-workers-${workers}`)).status, "active");
+  }
+});
+
 // ---------- logout-all ----------
 test("logout-all requires a valid Bearer, revokes only the actor's sessions, rejects client userId", async () => {
   const h = makeHarness();
@@ -297,6 +378,28 @@ test("logout-all requires a valid Bearer, revokes only the actor's sessions, rej
   assert.equal((await h.store.findById("s2")).status, "revoked");
   assert.equal((await h.store.findById("sX")).status, "active"); // cross-user isolation
   assert.ok(h.audits.some((e) => e.event === "mobile_all_sessions_revoked"));
+});
+
+test("B22D-P1-001 rate-limited logout-all does not claim, complete, revoke, or replay false success", async () => {
+  const spy = makeSecuritySpy({ limited: true });
+  const h = makeHarness({ deps: { security: spy.security, policy: POLICY } });
+  await seedSession(h.store, rt.generateRefreshToken(), { id: "rate-all-1", fam: "rate-all-fam-1", userId: "u1" });
+  await seedSession(h.store, rt.generateRefreshToken(), { id: "rate-all-2", fam: "rate-all-fam-2", userId: "u1" });
+  const handler = logoutAllH.createMobileLogoutAllHandler(h.deps);
+  const accessToken = sign.signAccessToken(claims({ userId: "u1", sv: 1, iat: BASE + 90 }), KEY);
+
+  const first = await handler({ body: {}, authorization: `Bearer ${accessToken}`, idempotencyKey: "idem_rate_all_0001" });
+  const replay = await handler({ body: {}, authorization: `Bearer ${accessToken}`, idempotencyKey: "idem_rate_all_0001" });
+
+  assert.equal(first.status, 429);
+  assert.equal(replay.status, 429);
+  assert.equal(first.headers["Retry-After"], "17");
+  assert.equal(spy.calls.rateLimit, 2);
+  assert.equal(spy.calls.claim, 0);
+  assert.equal(spy.calls.complete, 0);
+  assert.equal(spy.calls.fail, 0);
+  assert.equal((await h.store.findById("rate-all-1")).status, "active");
+  assert.equal((await h.store.findById("rate-all-2")).status, "active");
 });
 
 test("logout-all rejects a token whose sessionVersion no longer matches (TOKEN_EXPIRED)", async () => {

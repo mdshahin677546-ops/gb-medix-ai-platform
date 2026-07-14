@@ -1,7 +1,10 @@
 import { randomUUID } from "crypto";
 import { prisma } from "../prisma";
 import { PrismaDeviceSessionStore } from "../mobile-auth/v1/prisma-store";
-import { PrismaMobileAuthSecurityControls } from "../mobile-auth/v1/prisma-security-controls";
+import {
+  persistMobileAuthBoundaryAudit,
+  PrismaMobileAuthSecurityControls
+} from "../mobile-auth/v1/prisma-security-controls";
 import { loadMobileAuthConfig, accessTokenPolicyFromConfig } from "../mobile-auth/v1/config";
 import type { MobileUserFacts } from "../mobile-auth/v1/eligibility";
 import { newRequestId } from "./request-context";
@@ -10,6 +13,7 @@ import { finalize, type HandlerResult } from "./handler-result";
 import { createMobileRefreshHandler } from "./handlers/mobile-auth-refresh";
 import { createMobileLogoutHandler } from "./handlers/mobile-auth-logout";
 import { createMobileLogoutAllHandler } from "./handlers/mobile-auth-logout-all";
+import type { MobileAuthBoundaryRejection } from "./mobile-auth-boundary";
 
 /**
  * Real mobile-auth route wiring (imports @/lib/prisma + reads env, so it is kept
@@ -33,6 +37,25 @@ function getStore(): PrismaDeviceSessionStore {
 }
 
 const nowSeconds = (): number => Math.floor(Date.now() / 1000);
+
+export async function finalizeMobileAuthBoundaryRejection(
+  rejection: MobileAuthBoundaryRejection
+): Promise<HandlerResult> {
+  try {
+    await persistMobileAuthBoundaryAudit(
+      prisma as unknown as Parameters<typeof persistMobileAuthBoundaryAudit>[0],
+      {
+        endpoint: rejection.endpoint,
+        requestId: rejection.requestId,
+        reason: rejection.reason,
+        occurredAt: nowSeconds()
+      }
+    );
+    return rejection.result;
+  } catch {
+    return finalize(rejection.requestId, internalFailure(rejection.requestId));
+  }
+}
 
 async function getUserFacts(userId: string): Promise<MobileUserFacts | null> {
   const u = await prisma.user.findUnique({

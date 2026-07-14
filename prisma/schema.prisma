@@ -130,6 +130,8 @@ model MobileAuthAuditLog {
   userId          String?
   deviceSessionId String?
   tokenFamilyId   String?
+  endpoint        String?
+  requestId       String?
   createdAt       DateTime @default(now())
 
   @@index([event])
@@ -138,6 +140,8 @@ model MobileAuthAuditLog {
   @@index([userId])
   @@index([deviceSessionId])
   @@index([tokenFamilyId])
+  @@index([endpoint])
+  @@index([requestId])
 }
 
 model Merchant {

@@ -106,9 +106,7 @@ export function createMobileRefreshHandler(deps: MobileRefreshDeps) {
         const subjectDigest = deps.security.credentialDigest(presentedHash);
         const limited = await deps.security.checkRateLimit({ endpoint: "refresh", subjectDigest, now });
         if (!limited.ok) {
-          return finalize(requestId, failure("RATE_LIMITED", requestId), {
-            "Retry-After": String(limited.retryAfterSeconds)
-          });
+          return finalize(requestId, failure("RATE_LIMITED", requestId), { retryAfterSeconds: limited.retryAfterSeconds });
         }
         const claim = await deps.security.claimIdempotency({
           endpoint: "refresh",

@@ -12,6 +12,7 @@ import {
   type MobileAuthEndpoint,
   type MobileAuthRateLimitPolicy
 } from "./security-controls";
+import type { MobileAuthBoundaryRejectReason } from "../../api-v1/mobile-auth-boundary";
 
 type Queryable = {
   $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
@@ -66,12 +67,32 @@ export async function insertMobileAuthAudit(
   if (!event.outcome) throw new Error("Invalid or forbidden mobile auth audit event.");
   await tx.$queryRaw`
     INSERT INTO "MobileAuthAuditLog"
-      ("id", "event", "reason", "outcome", "occurredAt", "userId", "deviceSessionId", "tokenFamilyId")
+      ("id", "event", "reason", "outcome", "occurredAt", "userId", "deviceSessionId", "tokenFamilyId", "endpoint", "requestId")
     VALUES
       (${randomUUID()}, ${event.event}, ${event.reason ?? null}, ${event.outcome}, ${fromEpochSeconds(event.occurredAt)},
-       ${event.userId ?? null}, ${event.deviceSessionId ?? null}, ${event.tokenFamilyId ?? null})
+       ${event.userId ?? null}, ${event.deviceSessionId ?? null}, ${event.tokenFamilyId ?? null},
+       ${event.endpoint ?? null}, ${event.requestId ?? null})
     RETURNING "id"
   `;
+}
+
+export async function persistMobileAuthBoundaryAudit(
+  tx: SecurityTransactionClient,
+  input: {
+    endpoint: MobileAuthEndpoint;
+    requestId: string;
+    reason: MobileAuthBoundaryRejectReason;
+    occurredAt: number;
+  }
+): Promise<void> {
+  await insertMobileAuthAudit(tx, {
+    event: "mobile_auth_boundary_rejected",
+    occurredAt: input.occurredAt,
+    endpoint: input.endpoint,
+    requestId: input.requestId,
+    reason: input.reason,
+    outcome: "denied"
+  });
 }
 
 export async function completeMobileAuthIdempotency(

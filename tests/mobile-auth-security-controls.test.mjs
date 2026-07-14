@@ -54,6 +54,7 @@ try {
 test.after(() => rmSync(outDir, { recursive: true, force: true }));
 
 const boundary = requireCjs(resolve(outDir, "lib/api-v1/mobile-auth-boundary.js"));
+const handlerResult = requireCjs(resolve(outDir, "lib/api-v1/handler-result.js"));
 const audit = requireCjs(resolve(outDir, "lib/mobile-auth/v1/audit.js"));
 const security = requireCjs(resolve(outDir, "lib/mobile-auth/v1/security-controls.js"));
 
@@ -96,13 +97,13 @@ test("HMAC domain separation prevents raw key/body/token storage", () => {
 
 test("request boundary rejects query/content-type/body/header ambiguity before handler work", async () => {
   assert.equal((await boundary.prepareMobileAuthRequest(req(), "refresh")).ok, true);
-  assert.equal((await boundary.prepareMobileAuthRequest(req({ url: "https://example.test/x?debug=1" }), "refresh")).ok, false);
-  assert.equal((await boundary.prepareMobileAuthRequest(req({ headers: { "content-type": "text/plain" } }), "refresh")).ok, false);
-  assert.equal((await boundary.prepareMobileAuthRequest(req({ headers: { "content-type": "application/json; charset=latin1" } }), "refresh")).ok, false);
-  assert.equal((await boundary.prepareMobileAuthRequest(req({ headers: { "idempotency-key": IDEM + ",other" } }), "refresh")).ok, false);
-  assert.equal((await boundary.prepareMobileAuthRequest(req({ body: JSON.stringify({ refreshToken: REFRESH, userId: "u1" }) }), "refresh")).ok, false);
-  assert.equal((await boundary.prepareMobileAuthRequest(req({ body: `{"refreshToken":"${REFRESH}","__proto__":"x"}` }), "refresh")).ok, false);
-  assert.equal((await boundary.prepareMobileAuthRequest(req({ body: "x".repeat(8193) }), "refresh")).ok, false);
+  assert.equal((await boundary.prepareMobileAuthRequest(req({ url: "https://example.test/x?debug=1" }), "refresh")).rejection.reason, "query_rejected");
+  assert.equal((await boundary.prepareMobileAuthRequest(req({ headers: { "content-type": "text/plain" } }), "refresh")).rejection.reason, "content_type_rejected");
+  assert.equal((await boundary.prepareMobileAuthRequest(req({ headers: { "content-type": "application/json; charset=latin1" } }), "refresh")).rejection.reason, "content_type_rejected");
+  assert.equal((await boundary.prepareMobileAuthRequest(req({ headers: { "idempotency-key": IDEM + ",other" } }), "refresh")).rejection.reason, "header_rejected");
+  assert.equal((await boundary.prepareMobileAuthRequest(req({ body: JSON.stringify({ refreshToken: REFRESH, userId: "u1" }) }), "refresh")).rejection.reason, "body_schema_rejected");
+  assert.equal((await boundary.prepareMobileAuthRequest(req({ body: `{"refreshToken":"${REFRESH}","__proto__":"x"}` }), "refresh")).rejection.reason, "body_schema_rejected");
+  assert.equal((await boundary.prepareMobileAuthRequest(req({ body: "x".repeat(8193) }), "refresh")).rejection.reason, "body_too_large");
 });
 
 test("logout-all boundary accepts only a strict empty object", async () => {
@@ -129,9 +130,53 @@ test("audit allowlist includes new security events and rejects forbidden fields"
     assert.throws(() => audit.buildMobileAuthAuditEvent({
       event: "mobile_auth_boundary_rejected",
       occurredAt: 1,
-      reason: "boundary_rejected",
+      reason: "query_rejected",
       outcome: "denied",
       [field]: "x"
     }), audit.AuditValidationError);
+  }
+});
+
+test("B22D-BP2-001 boundary audit schema uses fixed endpoint/reason/requestId only", () => {
+  const event = audit.buildMobileAuthAuditEvent({
+    event: "mobile_auth_boundary_rejected",
+    occurredAt: 1,
+    endpoint: "refresh",
+    requestId: "req-1234:abcd",
+    reason: "query_rejected",
+    outcome: "denied"
+  });
+  assert.equal(event.endpoint, "refresh");
+  assert.equal(event.reason, "query_rejected");
+  assert.throws(() => audit.buildMobileAuthAuditEvent({
+    event: "mobile_auth_boundary_rejected",
+    occurredAt: 1,
+    endpoint: "admin",
+    requestId: "req-1234",
+    reason: "query_rejected",
+    outcome: "denied"
+  }), audit.AuditValidationError);
+  assert.throws(() => audit.buildMobileAuthAuditEvent({
+    event: "mobile_auth_boundary_rejected",
+    occurredAt: 1,
+    endpoint: "refresh",
+    requestId: "req-1\r\nx",
+    reason: "query_rejected",
+    outcome: "denied"
+  }), audit.AuditValidationError);
+});
+
+test("B22D-BP2-002 finalize allows only runtime-validated Retry-After", () => {
+  const failure = { status: 429, body: { ok: false, error: { code: "RATE_LIMITED", message: "Rate limited.", requestId: "req-1" } } };
+  const ok = handlerResult.finalize("req-1", failure, { retryAfterSeconds: 60 });
+  assert.equal(ok.headers["Retry-After"], "60");
+  assert.equal(ok.headers["Cache-Control"], "private, no-store");
+  assert.equal(ok.headers["X-Request-Id"], "req-1");
+
+  const base = handlerResult.finalize("req-1", failure);
+  assert.equal(base.headers["Retry-After"], undefined);
+
+  for (const bad of [0, -1, 1.5, 3601, Number.NaN, Number.POSITIVE_INFINITY, "60", "1\r\nSet-Cookie: x=1", null]) {
+    assert.throws(() => handlerResult.finalize("req-1", failure, { retryAfterSeconds: bad }), /Invalid Retry-After value/);
   }
 });
