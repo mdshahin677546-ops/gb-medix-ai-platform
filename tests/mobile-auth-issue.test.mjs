@@ -16,6 +16,7 @@ import { createRequire } from "node:module";
 const cwd = process.cwd();
 const files = [
   "lib/api-v1/handlers/mobile-auth-issue.ts",
+  "lib/api-v1/mobile-auth-boundary.ts",
   "lib/mobile-auth/v1/access-token-sign.ts",
   "lib/mobile-auth/v1/refresh-token.ts"
 ].map((f) => join(cwd, f));
@@ -42,6 +43,7 @@ test.after(() => rmSync(outDir, { recursive: true, force: true }));
 
 const E = (p) => requireCjs(resolve(outDir, "lib", p));
 const handlerMod = E("api-v1/handlers/mobile-auth-issue.js");
+const boundary = E("api-v1/mobile-auth-boundary.js");
 const sign = E("mobile-auth/v1/access-token-sign.js");
 
 const KEY = "test_signing_key_0123456789abcdef0123456789ABCDEF";
@@ -82,10 +84,23 @@ function makeDeps(over = {}) {
   return { deps, calls };
 }
 const body = { verificationToken: TOKEN, device: { platform: "ios", appVersion: "1.2.3" } };
+const IDEM = "idem-key-abcdef123456";
+
+function boundaryRequest({ endpoint = "issue", headers = {}, requestBody = body } = {}) {
+  return new Request(`https://api.test/mobile/${endpoint}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": IDEM,
+      ...headers
+    },
+    body: JSON.stringify(requestBody)
+  });
+}
 
 test("issue success returns tokens once and a verifiable access token", async () => {
   const { deps, calls } = makeDeps();
-  const res = await handlerMod.createMobileIssueHandler(deps)({ body, idempotencyKey: "idem-key-abcdef123456" });
+  const res = await handlerMod.createMobileIssueHandler(deps)({ body, idempotencyKey: IDEM });
   assert.equal(res.status, 200);
   assert.equal(res.headers["Cache-Control"], "private, no-store");
   assert.equal(res.body.ok, true);
@@ -97,7 +112,7 @@ test("issue success returns tokens once and a verifiable access token", async ()
 
 test("malformed body is rejected before any side effect", async () => {
   const { deps, calls } = makeDeps();
-  const res = await handlerMod.createMobileIssueHandler(deps)({ body: { device: { platform: "ios", appVersion: "1" } }, idempotencyKey: "idem-key-abcdef123456" });
+  const res = await handlerMod.createMobileIssueHandler(deps)({ body: { device: { platform: "ios", appVersion: "1" } }, idempotencyKey: IDEM });
   assert.equal(res.status, 400);
   assert.equal(res.body.error.code, "VALIDATION_ERROR");
   assert.equal(calls.checkRateLimit + calls.claimIdempotency + calls.exchange, 0);
@@ -116,7 +131,7 @@ test("rate limit is checked BEFORE claiming idempotency (no claim on 429)", asyn
     failIdempotency: async () => {}
   };
   deps.security = sec;
-  const res = await handlerMod.createMobileIssueHandler(deps)({ body, idempotencyKey: "idem-key-abcdef123456" });
+  const res = await handlerMod.createMobileIssueHandler(deps)({ body, idempotencyKey: IDEM });
   assert.equal(res.status, 429);
   assert.equal(res.headers["Retry-After"], "42");
   assert.equal(calls.claimIdempotency, 0, "must not claim idempotency on a rate-limited request");
@@ -126,7 +141,7 @@ test("rate limit is checked BEFORE claiming idempotency (no claim on 429)", asyn
 test("a completed idempotency key returns a fixed CONFLICT and never re-issues", async () => {
   const { deps, calls } = makeDeps();
   deps.security.claimIdempotency = async () => ({ status: "completed", id: "idem_1" });
-  const res = await handlerMod.createMobileIssueHandler(deps)({ body, idempotencyKey: "idem-key-abcdef123456" });
+  const res = await handlerMod.createMobileIssueHandler(deps)({ body, idempotencyKey: IDEM });
   assert.equal(res.status, 409);
   assert.equal(res.body.error.code, "CONFLICT");
   assert.equal(calls.exchange, 0, "must not re-issue on a completed key");
@@ -135,7 +150,59 @@ test("a completed idempotency key returns a fixed CONFLICT and never re-issues",
 test("an invalid/expired/consumed verification token yields a coarse AUTH_REQUIRED", async () => {
   const { deps } = makeDeps();
   deps.exchange = async () => ({ status: "invalid_token" });
-  const res = await handlerMod.createMobileIssueHandler(deps)({ body, idempotencyKey: "idem-key-abcdef123456" });
+  const res = await handlerMod.createMobileIssueHandler(deps)({ body, idempotencyKey: IDEM });
   assert.equal(res.status, 401);
   assert.equal(res.body.error.code, "AUTH_REQUIRED");
+});
+
+test("B22E-BP2-001 issue boundary rejects Authorization/Cookie presence before handler", async () => {
+  const cases = [
+    ["Bearer Authorization", { authorization: "Bearer access-token-value" }],
+    ["Basic Authorization", { authorization: "Basic abcdef" }],
+    ["empty Authorization header", { authorization: "" }],
+    ["Cookie", { cookie: "sid=secret-cookie" }],
+    ["Authorization and Cookie", { authorization: "Bearer access-token-value", cookie: "sid=secret-cookie" }]
+  ];
+  for (const [label, headers] of cases) {
+    let handlerCalls = 0;
+    const prepared = await boundary.prepareMobileAuthRequest(boundaryRequest({ headers }), "issue");
+    if (prepared.ok) handlerCalls += 1;
+    assert.equal(prepared.ok, false, label);
+    assert.equal(prepared.rejection.reason, "header_rejected", label);
+    assert.equal(handlerCalls, 0, label);
+    assert.equal(prepared.rejection.result.status, 400, label);
+    assert.equal(prepared.rejection.result.headers["Cache-Control"], "private, no-store", label);
+    assert.equal(prepared.rejection.result.headers["X-API-Version"], "1", label);
+    const serialized = JSON.stringify(prepared.rejection);
+    assert.equal(serialized.includes("access-token-value"), false, label);
+    assert.equal(serialized.includes("secret-cookie"), false, label);
+    assert.equal(serialized.includes(TOKEN), false, label);
+    assert.equal(serialized.includes(IDEM), false, label);
+  }
+});
+
+test("B22E-BP2-001 issue accepts no credential headers while logout-all keeps Bearer auth", async () => {
+  const issue = await boundary.prepareMobileAuthRequest(boundaryRequest(), "issue");
+  assert.equal(issue.ok, true);
+  assert.equal(issue.input.authorization, undefined);
+
+  const logoutAll = await boundary.prepareMobileAuthRequest(
+    boundaryRequest({
+      endpoint: "logout-all",
+      headers: { authorization: "Bearer mobile-access-token" },
+      requestBody: {}
+    }),
+    "logout-all"
+  );
+  assert.equal(logoutAll.ok, true);
+  assert.equal(logoutAll.input.authorization, "Bearer mobile-access-token");
+
+  const refresh = await boundary.prepareMobileAuthRequest(
+    boundaryRequest({
+      endpoint: "refresh",
+      requestBody: { refreshToken: "gbrt_v1_" + "a".repeat(48) }
+    }),
+    "refresh"
+  );
+  assert.equal(refresh.ok, true);
 });

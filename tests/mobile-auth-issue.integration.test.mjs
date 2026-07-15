@@ -30,6 +30,12 @@ const PG = resolvePgConfig();
 
 const MOBILE = "lib/mobile-auth/v1";
 const CONTRACT = "lib/api-contract/v1";
+const API_V1_FILES = [
+  "lib/api-v1/mobile-auth-boundary.ts",
+  "lib/api-v1/failure.ts",
+  "lib/api-v1/handler-result.ts",
+  "lib/api-v1/request-context.ts"
+];
 function collectTs(dir) {
   const out = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -42,13 +48,14 @@ function collectTs(dir) {
 const outDir = mkdtempSync(join(process.cwd(), ".tmp-mauth-issue-db-"));
 execFileSync(
   process.execPath,
-  ["node_modules/typescript/bin/tsc", ...collectTs(CONTRACT), ...collectTs(MOBILE),
+  ["node_modules/typescript/bin/tsc", ...collectTs(CONTRACT), ...collectTs(MOBILE), ...API_V1_FILES,
    "--outDir", outDir, "--rootDir", "lib", "--module", "commonjs", "--target", "es2020",
    "--moduleResolution", "node", "--esModuleInterop", "--strict", "--skipLibCheck"],
   { stdio: "pipe" }
 );
 const MINDEX = resolve(outDir, "mobile-auth/v1/index.js");
 const M = requireCjs(MINDEX);
+const boundary = requireCjs(resolve(outDir, "api-v1/mobile-auth-boundary.js"));
 const { PrismaClient } = requireCjs("@prisma/client");
 
 const DBNAME = `gbmedix_maissue_${Date.now()}_${randomBytes(4).toString("hex")}`;
@@ -111,6 +118,19 @@ function issueInput(token, now, over = {}) {
   };
 }
 
+const IDEM = "idem-key-abcdef123456";
+function boundaryIssueRequest(token, headers = {}) {
+  return new Request("https://api.test/api/v1/mobile/auth/issue", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": IDEM,
+      ...headers
+    },
+    body: JSON.stringify({ verificationToken: token, device: { platform: "ios", appVersion: "1.2.3" } })
+  });
+}
+
 test("migration allows the 'issue' endpoint in the security-control CHECK constraints", async () => {
   // A rate-limit bucket + idempotency + audit row with endpoint='issue' must be accepted.
   await prisma.$executeRawUnsafe(
@@ -119,6 +139,61 @@ test("migration allows the 'issue' endpoint in the security-control CHECK constr
   );
   const rows = await prisma.$queryRawUnsafe(`SELECT 1 FROM "MobileAuthAuditLog" WHERE "endpoint"='issue' LIMIT 1`);
   assert.equal(rows.length, 1);
+});
+
+test("B22E-BP2-001 issue credential headers are rejected before handler and audited without side effects", async () => {
+  const cases = [
+    ["Bearer Authorization", { authorization: "Bearer access-token-value" }],
+    ["Basic Authorization", { authorization: "Basic abcdef" }],
+    ["empty Authorization header", { authorization: "" }],
+    ["Cookie", { cookie: "sid=secret-cookie" }],
+    ["Authorization and Cookie", { authorization: "Bearer access-token-value", cookie: "sid=secret-cookie" }]
+  ];
+  for (const [label, headers] of cases) {
+    const { userId, token, now } = await seedPendingUserWithToken();
+    const beforeIdempotency = await prisma.mobileAuthIdempotencyRecord.count({ where: { endpoint: "issue" } });
+    let handlerCalls = 0;
+    const prepared = await boundary.prepareMobileAuthRequest(boundaryIssueRequest(token, headers), "issue");
+    if (prepared.ok) handlerCalls += 1;
+
+    assert.equal(prepared.ok, false, label);
+    assert.equal(prepared.rejection.reason, "header_rejected", label);
+    assert.equal(handlerCalls, 0, label);
+    assert.equal(prepared.rejection.result.status, 400, label);
+    assert.equal(prepared.rejection.result.headers["Cache-Control"], "private, no-store", label);
+    assert.equal(prepared.rejection.result.headers["X-API-Version"], "1", label);
+
+    await M.persistMobileAuthBoundaryAudit(prisma, {
+      endpoint: prepared.rejection.endpoint,
+      requestId: prepared.rejection.requestId,
+      reason: prepared.rejection.reason,
+      occurredAt: now
+    });
+
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { status: true, emailVerifiedAt: true } });
+    assert.equal(user.status, "pending", label);
+    assert.equal(user.emailVerifiedAt, null, label);
+    const ev = await prisma.emailVerification.findUnique({ where: { token }, select: { verifiedAt: true } });
+    assert.equal(ev.verifiedAt, null, label);
+    assert.equal(await prisma.deviceSession.count({ where: { userId } }), 0, label);
+    assert.equal(await prisma.mobileAuthIdempotencyRecord.count({ where: { endpoint: "issue" } }), beforeIdempotency, label);
+
+    const audits = await prisma.mobileAuthAuditLog.findMany({
+      where: { requestId: prepared.rejection.requestId, endpoint: "issue" }
+    });
+    assert.equal(audits.length, 1, label);
+    assert.equal(audits[0].event, "mobile_auth_boundary_rejected", label);
+    assert.equal(audits[0].reason, "header_rejected", label);
+    assert.equal(audits[0].outcome, "denied", label);
+    assert.equal(audits[0].requestId, prepared.rejection.requestId, label);
+
+    const serialized = JSON.stringify({ response: prepared.rejection.result, audit: audits[0] });
+    assert.equal(serialized.includes("access-token-value"), false, label);
+    assert.equal(serialized.includes("secret-cookie"), false, label);
+    assert.equal(serialized.includes(token), false, label);
+    assert.equal(serialized.includes(IDEM), false, label);
+    assert.equal(serialized.includes("1.2.3"), false, label);
+  }
 });
 
 test("issue success: consumes token, activates user, creates exactly one session + audit", async () => {
