@@ -160,6 +160,22 @@ function assertValidRow(session: DeviceSession): DeviceSession {
   return session;
 }
 
+/** Batch 2.2E — server-computed inputs for an email-verification -> session exchange. */
+export type IssueSessionInput = {
+  verificationToken: string;
+  sessionId: string;
+  tokenFamilyId: string;
+  refreshTokenHash: string;
+  now: number;
+  idleExpiresAt: number;
+  absoluteExpiresAt: number;
+};
+
+export type IssueSessionResult =
+  | { status: "issued"; session: DeviceSession; userId: string; sessionVersion: number }
+  /** Missing / expired / already-consumed verification token — a coarse auth failure. */
+  | { status: "invalid_token" };
+
 export class PrismaDeviceSessionStore implements DeviceSessionStore {
   constructor(private readonly prisma: MobileAuthPrisma) {}
 
@@ -559,5 +575,99 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
       where: { expiresAt: { lte: fromEpochSeconds(now) } }
     });
     return count;
+  }
+
+  /**
+   * Batch 2.2E — atomically exchange a single-use EmailVerification token for a new
+   * active DeviceSession. In ONE transaction: consume the token (row-locked,
+   * single-use), activate the User (same semantics as web email verification; does
+   * NOT bump sessionVersion), create exactly one DeviceSession, and — in the SAME
+   * transaction — write the issuance audit and complete idempotency. Any failure
+   * rolls the whole thing back (no verifiedAt transition, no activation, no session,
+   * no audit, no idempotency completion). The verification token is never copied into
+   * any new table, audit, or log; only the refresh-token HASH is persisted.
+   */
+  async issueSessionFromVerificationWithAudit(
+    input: IssueSessionInput,
+    buildAudit: (
+      userId: string,
+      deviceSessionId: string
+    ) => {
+      event: "mobile_session_created";
+      endpoint: "issue";
+      occurredAt: number;
+      userId: string;
+      deviceSessionId: string;
+      reason: "created";
+      outcome: "success";
+    },
+    idempotencyRecordId?: string
+  ): Promise<IssueSessionResult> {
+    // Server-computed values must be structurally valid; a corrupt window is a bug,
+    // not an auth failure, so it fails closed to a rolled-back internal error.
+    if (
+      !HEX64.test(input.refreshTokenHash) ||
+      !isSafeTimestamp(input.now) ||
+      !isSafeTimestamp(input.idleExpiresAt) ||
+      !isSafeTimestamp(input.absoluteExpiresAt) ||
+      input.idleExpiresAt <= input.now ||
+      input.absoluteExpiresAt <= input.now ||
+      input.idleExpiresAt > input.absoluteExpiresAt
+    ) {
+      throw new DeviceSessionInvariantError();
+    }
+    const nowTs = fromEpochSeconds(input.now);
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Consume the verification token — single-use + not expired. The conditional
+      //    UPDATE row-locks the token, so concurrent issuance serializes and only the
+      //    first request sees a row (0 rows => missing / already-used / expired).
+      const consumed = (await tx.$queryRaw`
+        UPDATE "EmailVerification"
+        SET "verifiedAt" = to_timestamp(${input.now}) AT TIME ZONE 'UTC'
+        WHERE "token" = ${input.verificationToken}
+          AND "verifiedAt" IS NULL
+          AND EXTRACT(EPOCH FROM "expiresAt") > ${input.now}
+        RETURNING "userId"
+      `) as Array<{ userId: string }>;
+      if (consumed.length === 0) return { status: "invalid_token" as const };
+      const userId = consumed[0].userId;
+
+      // 2. Activate the user — identical to web verify-email semantics (status=active,
+      //    emailVerifiedAt set); sessionVersion is NOT bumped. A missing user rolls back.
+      const activated = (await tx.$queryRaw`
+        UPDATE "User"
+        SET "status" = 'active', "emailVerifiedAt" = to_timestamp(${input.now}) AT TIME ZONE 'UTC'
+        WHERE "id" = ${userId}
+        RETURNING "sessionVersion"
+      `) as Array<{ sessionVersion: number }>;
+      if (activated.length === 0) throw new DeviceSessionInvariantError();
+      const sessionVersion = activated[0].sessionVersion;
+
+      // 3. Global refresh-hash exclusivity, then create exactly one active session.
+      await tx.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(hashtextextended(${input.refreshTokenHash}, 0::bigint))) _l`;
+      const inCurrent = (await tx.$queryRaw`SELECT 1 FROM "DeviceSession" WHERE "refreshTokenHash" = ${input.refreshTokenHash} LIMIT 1`) as unknown[];
+      const inConsumed = (await tx.$queryRaw`SELECT 1 FROM "ConsumedRefreshToken" WHERE "refreshTokenHash" = ${input.refreshTokenHash} LIMIT 1`) as unknown[];
+      if (inCurrent.length > 0 || inConsumed.length > 0) throw new DeviceSessionInvariantError();
+      const row = await tx.deviceSession.create({
+        data: {
+          id: input.sessionId,
+          userId,
+          tokenFamilyId: input.tokenFamilyId,
+          status: "active",
+          rotationCounter: 0,
+          refreshTokenHash: input.refreshTokenHash,
+          createdAt: nowTs,
+          lastUsedAt: nowTs,
+          idleExpiresAt: fromEpochSeconds(input.idleExpiresAt),
+          absoluteExpiresAt: fromEpochSeconds(input.absoluteExpiresAt)
+        }
+      });
+
+      // 4. Audit + idempotency completion in the SAME transaction (all-or-nothing).
+      await insertMobileAuthAudit(tx, buildAudit(userId, input.sessionId));
+      if (idempotencyRecordId) await completeMobileAuthIdempotency(tx, idempotencyRecordId, input.now);
+
+      return { status: "issued" as const, session: mapRow(row), userId, sessionVersion };
+    });
   }
 }

@@ -13,6 +13,7 @@ import { finalize, type HandlerResult } from "./handler-result";
 import { createMobileRefreshHandler } from "./handlers/mobile-auth-refresh";
 import { createMobileLogoutHandler } from "./handlers/mobile-auth-logout";
 import { createMobileLogoutAllHandler } from "./handlers/mobile-auth-logout-all";
+import { createMobileIssueHandler } from "./handlers/mobile-auth-issue";
 import type { MobileAuthBoundaryRejection } from "./mobile-auth-boundary";
 
 /**
@@ -148,6 +149,36 @@ export async function runMobileLogoutAll(input: {
       revokeAllUserSessions: (userId, reason, now) => store.revokeAllUserSessions(userId, reason, now),
       revokeAllUserSessionsWithAudit: (userId, reason, now, audit, idempotencyRecordId) =>
         store.revokeAllUserSessionsWithAudit(userId, reason, now, audit, idempotencyRecordId)
+    });
+    return await handler(input);
+  } catch {
+    return finalize(requestId, internalFailure(requestId));
+  }
+}
+
+export async function runMobileIssue(input: { body: unknown; idempotencyKey?: string }): Promise<HandlerResult> {
+  const requestId = newRequestId();
+  try {
+    const config = loadMobileAuthConfig();
+    const store = getStore();
+    const handler = createMobileIssueHandler({
+      now: nowSeconds,
+      pepper: config.pepper,
+      signingKey: config.signingKey,
+      issuer: config.issuer,
+      audience: config.audience,
+      accessTtlSeconds: config.accessTtlSeconds,
+      refreshIdleTtlSeconds: config.refreshIdleTtlSeconds,
+      refreshAbsoluteTtlSeconds: config.refreshAbsoluteTtlSeconds,
+      security: new PrismaMobileAuthSecurityControls(
+        prisma as unknown as ConstructorParameters<typeof PrismaMobileAuthSecurityControls>[0],
+        config.controlKey
+      ),
+      exchange: (exchangeInput, buildAudit, idempotencyRecordId) =>
+        store.issueSessionFromVerificationWithAudit(exchangeInput, buildAudit, idempotencyRecordId),
+      newSessionId: () => randomUUID(),
+      newTokenFamilyId: () => randomUUID(),
+      newTokenId: () => randomUUID()
     });
     return await handler(input);
   } catch {

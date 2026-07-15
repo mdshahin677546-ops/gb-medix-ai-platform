@@ -1,4 +1,5 @@
 import {
+  mobileIssueRequestSchema,
   mobileLogoutAllRequestSchema,
   mobileLogoutRequestSchema,
   mobileRefreshRequestSchema
@@ -130,6 +131,10 @@ function parseEndpointBody(endpoint: MobileAuthEndpoint, value: unknown): Record
     const parsed = mobileLogoutRequestSchema.safeParse(value);
     return parsed.success ? parsed.data : null;
   }
+  if (endpoint === "issue") {
+    const parsed = mobileIssueRequestSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  }
   const parsed = mobileLogoutAllRequestSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
@@ -147,8 +152,12 @@ export async function prepareMobileAuthRequest(
   }
 
   const authorization = singletonHeader(request.headers, "authorization");
+  const hasCookie = request.headers.has("cookie");
   const idempotencyHeader = singletonHeader(request.headers, "idempotency-key");
   if (authorization === "__ambiguous__" || idempotencyHeader === "__ambiguous__") {
+    return boundaryFailure(endpoint, "header_rejected");
+  }
+  if (endpoint === "issue" && (request.headers.has("authorization") || hasCookie)) {
     return boundaryFailure(endpoint, "header_rejected");
   }
   const idempotency = parseIdempotencyKey(idempotencyHeader);
