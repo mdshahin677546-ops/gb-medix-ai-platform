@@ -25,3 +25,4 @@ export * from "./handlers/entitlements";
 export * from "./handlers/mobile-auth-refresh";
 export * from "./handlers/mobile-auth-logout";
 export * from "./handlers/mobile-auth-logout-all";
+export * from "./handlers/mobile-auth-issue";

@@ -105,3 +105,46 @@ export type MobileLogoutRequest = z.infer<typeof mobileLogoutRequestSchema>;
  */
 export const mobileLogoutAllRequestSchema = z.object({}).strict();
 export type MobileLogoutAllRequest = z.infer<typeof mobileLogoutAllRequestSchema>;
+
+/**
+ * Batch 2.2E — mobile email-verification issuance. The verification token is an
+ * existing (opaque, single-use) EmailVerification token. Device metadata is a
+ * strict allowlist; no cookie / Bearer / client userId/email/status is accepted.
+ * The device sub-schema is defined inline so the wire contract stays free of any
+ * mobile-auth/v1 dependency (the crypto/policy layer already imports this module).
+ */
+export const mobileIssueDeviceSchema = z
+  .object({
+    platform: z.enum(["ios", "android"]),
+    appVersion: z
+      .string()
+      .min(1)
+      .max(32)
+      .regex(/^[0-9A-Za-z.+-]+$/),
+    deviceLabel: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[A-Za-z0-9 ._-]+$/)
+      .optional()
+  })
+  .strict();
+
+export const mobileIssueRequestSchema = z
+  .object({
+    verificationToken: z.string().min(20).max(256),
+    device: mobileIssueDeviceSchema
+  })
+  .strict();
+export type MobileIssueRequest = z.infer<typeof mobileIssueRequestSchema>;
+
+/** Issued exactly once; identical shape to the refresh result (no token at rest). */
+export const mobileIssueResultSchema = z
+  .object({
+    accessToken: z.string().min(1),
+    refreshToken: refreshTokenSchema,
+    accessTokenExpiresInSeconds: z.number().int().positive(),
+    deviceSessionId: deviceSessionIdSchema
+  })
+  .strict();
+export type MobileIssueResult = z.infer<typeof mobileIssueResultSchema>;

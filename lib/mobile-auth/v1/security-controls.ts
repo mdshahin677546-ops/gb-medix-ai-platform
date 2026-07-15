@@ -1,6 +1,6 @@
 import { createHmac } from "crypto";
 
-export const MOBILE_AUTH_ENDPOINTS = ["refresh", "logout", "logout-all"] as const;
+export const MOBILE_AUTH_ENDPOINTS = ["refresh", "logout", "logout-all", "issue"] as const;
 export type MobileAuthEndpoint = (typeof MOBILE_AUTH_ENDPOINTS)[number];
 
 export const IDEMPOTENCY_KEY_MIN_LENGTH = 16;
@@ -84,7 +84,11 @@ export type MobileAuthRateLimitPolicy = {
 export const DEFAULT_MOBILE_AUTH_RATE_LIMITS: Record<MobileAuthEndpoint, MobileAuthRateLimitPolicy> = {
   refresh: { windowSeconds: 60, maxRequests: 20 },
   logout: { windowSeconds: 60, maxRequests: 30 },
-  "logout-all": { windowSeconds: 60, maxRequests: 10 }
+  "logout-all": { windowSeconds: 60, maxRequests: 10 },
+  // Issuance is a one-time exchange per verification token; keep the per-credential
+  // ceiling low. Concurrency safety is enforced by the atomic transaction + token
+  // consumption, not by this coarse rate limit.
+  issue: { windowSeconds: 60, maxRequests: 10 }
 };
 
 export const IDEMPOTENCY_TTL_SECONDS = 60 * 60;

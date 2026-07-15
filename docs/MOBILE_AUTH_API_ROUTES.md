@@ -74,3 +74,32 @@ not fabricate a pass — the DB-gated suites are reported as blocked, not green.
 Password login, OAuth, SecureStore mobile client, production signing key / refresh
 pepper / secrets, Prisma schema or migration changes, payment / Stripe /
 entitlement, real AI provider calls, and any deploy / Vercel / env change.
+
+## POST /api/v1/mobile/auth/issue (Batch 2.2E)
+
+Exchanges an existing single-use `EmailVerification` token for a new mobile
+`DeviceSession`. Auth authority comes ONLY from the row-locked `EmailVerification`
+and its `User` — never a Web cookie, Bearer token, or client-supplied
+`userId`/`email`/`status`/`sessionVersion`.
+
+- **Request** (JSON only, no query, `Idempotency-Key` required):
+  `{ verificationToken, device: { platform: "ios"|"android", appVersion, deviceLabel? } }`.
+- **Atomic transaction** (all-or-nothing): consume the token (conditional
+  single-use `UPDATE ... WHERE verifiedAt IS NULL AND not expired`, row-locked) →
+  activate the user (`status="active"`, `emailVerifiedAt` set; `sessionVersion` is
+  NOT bumped, matching web email verification) → create exactly one active
+  `DeviceSession` (only the refresh-token HASH is persisted) → write a
+  `mobile_session_created` audit (endpoint `issue`) → complete idempotency → commit.
+  Any failure rolls the whole thing back.
+- **Success (returned exactly once):** `accessToken`, `refreshToken`,
+  `deviceSessionId`, `accessTokenExpiresInSeconds`. Token plaintext and the success
+  response are never persisted.
+- **Replay:** a same-key retry returns a fixed `CONFLICT` (never re-issues), because
+  no token plaintext / response JSON is stored. Concurrent requests on the same
+  verification token yield exactly one success (row-lock serialization).
+- Reuses the Batch 2.2C/2.2D controls: strict boundary + boundary-rejection audit,
+  DB-backed rate limit, required idempotency, digest binding, endpoint DB CHECK
+  constraints, fixed safe errors, `private, no-store`, `X-API-Version: 1`,
+  server-generated `X-Request-Id`, strict `Retry-After`.
+- Timestamps cross the DB boundary in epoch seconds (`EXTRACT(EPOCH …)` /
+  `to_timestamp(...) AT TIME ZONE 'UTC'`) so token-expiry checks are timezone-safe.

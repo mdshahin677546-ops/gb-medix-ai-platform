@@ -1,4 +1,5 @@
 import {
+  mobileIssueRequestSchema,
   mobileLogoutAllRequestSchema,
   mobileLogoutRequestSchema,
   mobileRefreshRequestSchema
@@ -128,6 +129,10 @@ function parseEndpointBody(endpoint: MobileAuthEndpoint, value: unknown): Record
   }
   if (endpoint === "logout") {
     const parsed = mobileLogoutRequestSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  }
+  if (endpoint === "issue") {
+    const parsed = mobileIssueRequestSchema.safeParse(value);
     return parsed.success ? parsed.data : null;
   }
   const parsed = mobileLogoutAllRequestSchema.safeParse(value);

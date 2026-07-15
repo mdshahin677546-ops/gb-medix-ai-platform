@@ -104,7 +104,7 @@ export const mobileAuthAuditEventSchema = z
     userId: z.string().min(1).max(128).optional(),
     deviceSessionId: z.string().min(1).max(128).optional(),
     tokenFamilyId: z.string().min(1).max(128).optional(),
-    endpoint: z.enum(["refresh", "logout", "logout-all"]).optional(),
+    endpoint: z.enum(["refresh", "logout", "logout-all", "issue"]).optional(),
     requestId: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/).optional(),
     // Controlled enum only — no arbitrary details/message/context escape hatch.
     reason: z.enum(MOBILE_AUTH_AUDIT_REASONS).optional(),
