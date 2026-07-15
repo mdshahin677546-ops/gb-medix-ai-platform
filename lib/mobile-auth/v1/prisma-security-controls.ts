@@ -36,10 +36,8 @@ type IdempotencyRow = {
 };
 
 type RateLimitRow = {
-  id: string;
   count: number;
-  windowStart: Date;
-  windowSeconds: number;
+  allowed: boolean;
 };
 
 export type IdempotencyClaimResult =
@@ -274,46 +272,74 @@ export class PrismaMobileAuthSecurityControls {
     const policy = this.rateLimits[input.endpoint];
     const windowStart = Math.floor(input.now / policy.windowSeconds) * policy.windowSeconds;
     const bucketKey = rateLimitBucketKey(this.controlKey, input.endpoint, `${input.subjectDigest}:${windowStart}`);
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(hashtextextended(${bucketKey}, 29::bigint))) _l`;
-      const rows = (await tx.$queryRaw`
-        SELECT "id", "count", "windowStart", "windowSeconds"
-        FROM "MobileAuthRateLimitBucket"
-        WHERE "bucketKey" = ${bucketKey}
-        FOR UPDATE
-      `) as RateLimitRow[];
-      const existing = rows[0];
-      if (!existing) {
-        await tx.$queryRaw`
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const auditId = randomUUID();
+      const rows = (await this.prisma.$queryRaw`
+        WITH existing AS (
+          SELECT "count"
+          FROM "MobileAuthRateLimitBucket"
+          WHERE "bucketKey" = ${bucketKey}
+          FOR UPDATE
+        ),
+        updated AS (
+          UPDATE "MobileAuthRateLimitBucket"
+          SET "count" = "count" + 1, "updatedAt" = ${fromEpochSeconds(input.now)}
+          WHERE "bucketKey" = ${bucketKey}
+            AND "count" < ${policy.maxRequests}
+            AND EXISTS (SELECT 1 FROM existing)
+          RETURNING "count", true AS "allowed"
+        ),
+        inserted AS (
           INSERT INTO "MobileAuthRateLimitBucket"
             ("id", "endpoint", "subjectDigest", "bucketKey", "windowStart", "windowSeconds", "count", "expiresAt", "userId")
-          VALUES
-            (${randomUUID()}, ${input.endpoint}, ${input.subjectDigest}, ${bucketKey}, ${fromEpochSeconds(windowStart)},
-             ${policy.windowSeconds}, 1, ${fromEpochSeconds(windowStart + policy.windowSeconds * 2)}, ${input.userId ?? null})
+          SELECT
+            ${randomUUID()}, ${input.endpoint}, ${input.subjectDigest}, ${bucketKey}, ${fromEpochSeconds(windowStart)},
+            ${policy.windowSeconds}, 1, ${fromEpochSeconds(windowStart + policy.windowSeconds * 2)}, ${input.userId ?? null}
+          WHERE NOT EXISTS (SELECT 1 FROM existing)
+          ON CONFLICT ("bucketKey") DO NOTHING
+          RETURNING "count", true AS "allowed"
+        ),
+        limited AS (
+          SELECT "count", false AS "allowed"
+          FROM "MobileAuthRateLimitBucket"
+          WHERE "bucketKey" = ${bucketKey}
+            AND EXISTS (SELECT 1 FROM existing)
+            AND NOT EXISTS (SELECT 1 FROM updated)
+        ),
+        audit AS (
+          INSERT INTO "MobileAuthAuditLog"
+            ("id", "event", "reason", "outcome", "occurredAt", "userId")
+          SELECT
+            ${auditId}, 'mobile_auth_rate_limited', 'rate_limited', 'rate_limited',
+            ${fromEpochSeconds(input.now)}, ${input.userId ?? null}
+          FROM limited
           RETURNING "id"
-        `;
-        return { ok: true, remaining: policy.maxRequests - 1 };
-      }
-      if (existing.count >= policy.maxRequests) {
-        await insertMobileAuthAudit(tx, {
-          event: "mobile_auth_rate_limited",
-          occurredAt: input.now,
-          reason: "rate_limited",
-          outcome: "rate_limited",
-          ...(input.userId ? { userId: input.userId } : {})
-        });
+        ),
+        limited_with_audit AS (
+          SELECT limited."count", limited."allowed"
+          FROM limited
+          LEFT JOIN audit ON true
+        )
+        SELECT "count", "allowed" FROM updated
+        UNION ALL
+        SELECT "count", "allowed" FROM inserted
+        UNION ALL
+        SELECT "count", "allowed" FROM limited_with_audit
+        LIMIT 1
+      `) as RateLimitRow[];
+      const row = rows[0];
+      if (row) {
+        if (row.allowed) return { ok: true, remaining: Math.max(0, policy.maxRequests - row.count) };
         return {
           ok: false,
           retryAfterSeconds: safeRetryAfterSeconds(input.now, windowStart, policy.windowSeconds)
         };
       }
-      await tx.$queryRaw`
-        UPDATE "MobileAuthRateLimitBucket"
-        SET "count" = "count" + 1, "updatedAt" = ${fromEpochSeconds(input.now)}
-        WHERE "id" = ${existing.id}
-        RETURNING "id"
-      `;
-      return { ok: true, remaining: policy.maxRequests - existing.count - 1 };
-    });
+      // Empty result means this statement lost the first-insert race: another
+      // worker inserted the bucket between our snapshot and ON CONFLICT. No row
+      // was changed by this attempt, so a short bounded retry is safe.
+      await new Promise((resolve) => setTimeout(resolve, 5 * (attempt + 1)));
+    }
+    throw new Error("Mobile auth rate limit contention did not settle.");
   }
 }
