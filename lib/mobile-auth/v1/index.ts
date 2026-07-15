@@ -18,3 +18,5 @@ export * from "./device-metadata";
 export * from "./audit";
 export * from "./access-token-sign";
 export * from "./config";
+export * from "./security-controls";
+export * from "./prisma-security-controls";

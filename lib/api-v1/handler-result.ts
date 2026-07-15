@@ -13,9 +13,33 @@ export type HandlerResult = {
   body: unknown;
 };
 
+export type FinalizeOptions = {
+  retryAfterSeconds?: unknown;
+};
+
+export const MAX_RETRY_AFTER_SECONDS = 3600;
+
+function retryAfterHeader(value: unknown): string {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > MAX_RETRY_AFTER_SECONDS
+  ) {
+    throw new Error("Invalid Retry-After value.");
+  }
+  return String(value);
+}
+
 export function finalize(
   requestId: string,
-  result: ApiOk<unknown> | ApiFailure
+  result: ApiOk<unknown> | ApiFailure,
+  options: FinalizeOptions = {}
 ): HandlerResult {
-  return { status: result.status, headers: buildApiHeaders(requestId), body: result.body };
+  const headers = buildApiHeaders(requestId);
+  if (options.retryAfterSeconds !== undefined) {
+    headers["Retry-After"] = retryAfterHeader(options.retryAfterSeconds);
+  }
+  return { status: result.status, headers, body: result.body };
 }

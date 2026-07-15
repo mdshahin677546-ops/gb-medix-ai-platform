@@ -14,6 +14,7 @@ import { MIN_ACCESS_TOKEN_SIGNING_KEY_LENGTH } from "./access-token-sign";
 export const MOBILE_AUTH_ENV = {
   signingKey: "MOBILE_AUTH_ACCESS_TOKEN_SIGNING_KEY",
   pepper: "MOBILE_AUTH_REFRESH_TOKEN_PEPPER",
+  controlKey: "MOBILE_AUTH_CONTROL_KEY",
   issuer: "MOBILE_AUTH_ISSUER",
   audience: "MOBILE_AUTH_AUDIENCE",
   accessTtl: "MOBILE_AUTH_ACCESS_TTL_SECONDS",
@@ -31,6 +32,7 @@ const CLOCK_SKEW_MAX = 300;
 export type MobileAuthConfig = {
   signingKey: string;
   pepper: string;
+  controlKey: string;
   issuer: string;
   audience: string;
   accessTtlSeconds: number;
@@ -86,6 +88,7 @@ export function loadMobileAuthConfig(env: EnvMap = process.env): MobileAuthConfi
   const config: MobileAuthConfig = {
     signingKey: requireSecret(env, MOBILE_AUTH_ENV.signingKey, MIN_ACCESS_TOKEN_SIGNING_KEY_LENGTH),
     pepper: requireSecret(env, MOBILE_AUTH_ENV.pepper, MIN_PEPPER_LENGTH),
+    controlKey: requireSecret(env, MOBILE_AUTH_ENV.controlKey, MIN_PEPPER_LENGTH),
     issuer: requireString(env, MOBILE_AUTH_ENV.issuer, 256),
     audience: requireString(env, MOBILE_AUTH_ENV.audience, 256),
     accessTtlSeconds: requireIntInRange(env, MOBILE_AUTH_ENV.accessTtl, 60, ACCESS_TTL_MAX),

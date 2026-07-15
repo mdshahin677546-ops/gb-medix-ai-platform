@@ -23,7 +23,38 @@ export type MobileLogoutAllDeps = {
   policy: AccessTokenPolicy;
   getUserFacts: (userId: string) => Promise<MobileUserFacts | null>;
   revokeAllUserSessions: (userId: string, reason: RevokeReason, now: number) => Promise<number>;
+  revokeAllUserSessionsWithAudit?: (
+    userId: string,
+    reason: RevokeReason,
+    now: number,
+    audit: {
+      event: "mobile_all_sessions_revoked";
+      occurredAt: number;
+      userId: string;
+      reason: "user_logout_all";
+      outcome: "success";
+    },
+    idempotencyRecordId?: string
+  ) => Promise<number>;
   audit?: (event: unknown) => void;
+  security?: {
+    actorDigest: (value: string) => string;
+    credentialDigest: (value: string) => string;
+    requestDigest: (endpoint: "logout-all", body: Record<string, unknown>) => string;
+    checkRateLimit: (input: { endpoint: "logout-all"; subjectDigest: string; now: number; userId?: string }) => Promise<
+      { ok: true } | { ok: false; retryAfterSeconds: number }
+    >;
+    claimIdempotency: (input: {
+      endpoint: "logout-all";
+      rawKey: string;
+      actorDigest: string;
+      credentialDigest: string;
+      requestDigest: string;
+      now: number;
+    }) => Promise<{ status: "claimed"; id: string } | { status: "completed"; id: string } | { status: "conflict" }>;
+    completeIdempotency: (id: string, now: number) => Promise<void>;
+    failIdempotency: (id: string, now: number) => Promise<void>;
+  };
 };
 
 function emitAudit(audit: ((e: unknown) => void) | undefined, input: unknown): void {
@@ -36,10 +67,13 @@ function emitAudit(audit: ((e: unknown) => void) | undefined, input: unknown): v
 }
 
 export function createMobileLogoutAllHandler(deps: MobileLogoutAllDeps) {
-  return async function POST(input: { body: unknown; authorization: unknown }): Promise<HandlerResult> {
+  return async function POST(input: { body: unknown; authorization: unknown; idempotencyKey?: string }): Promise<HandlerResult> {
     const requestId = newRequestId();
+    let idempotencyRecordId: string | undefined;
+    let nowForFailure: number | null = null;
     try {
       const now = deps.now();
+      nowForFailure = now;
 
       // 1. Bearer authentication (server-verified; never trusts token-body facts).
       const bearer = verifyBearerAccessToken(input.authorization, deps.signingKey, deps.policy, now);
@@ -60,16 +94,61 @@ export function createMobileLogoutAllHandler(deps: MobileLogoutAllDeps) {
         return finalize(requestId, failure(code, requestId));
       }
 
+      if (deps.security && input.idempotencyKey) {
+        const actor = deps.security.actorDigest(bearer.claims.sub);
+        const credential = deps.security.credentialDigest(`${bearer.claims.sub}:${bearer.claims.sid}:${bearer.claims.sv}`);
+        // Rate limit FIRST (B22D-P1-001): a denied request must NEVER claim or
+        // complete an idempotency record, so a same-key retry can never replay as a
+        // false success. checkRateLimit persists its own rate-limit audit; no
+        // revoke side effect runs on a 429.
+        const limited = await deps.security.checkRateLimit({
+          endpoint: "logout-all",
+          subjectDigest: actor,
+          now,
+          userId: bearer.claims.sub
+        });
+        if (!limited.ok) {
+          return finalize(requestId, failure("RATE_LIMITED", requestId), { retryAfterSeconds: limited.retryAfterSeconds });
+        }
+        const claim = await deps.security.claimIdempotency({
+          endpoint: "logout-all",
+          rawKey: input.idempotencyKey,
+          actorDigest: actor,
+          credentialDigest: credential,
+          requestDigest: deps.security.requestDigest("logout-all", parsedBody.data),
+          now
+        });
+        if (claim.status === "conflict") return finalize(requestId, failure("CONFLICT", requestId));
+        if (claim.status === "completed") return finalize(requestId, success({ acknowledged: true }, requestId));
+        idempotencyRecordId = claim.id;
+      }
+
       // 4. Revoke every session owned by the verified actor only.
-      await deps.revokeAllUserSessions(bearer.claims.sub, "user_logout_all", now);
-      emitAudit(deps.audit, {
-        event: "mobile_all_sessions_revoked",
+      const audit = {
+        event: "mobile_all_sessions_revoked" as const,
         occurredAt: now,
         userId: bearer.claims.sub,
-        reason: "user_logout_all"
-      });
+        reason: "user_logout_all" as const,
+        outcome: "success" as const
+      };
+      if (deps.revokeAllUserSessionsWithAudit) {
+        await deps.revokeAllUserSessionsWithAudit(
+          bearer.claims.sub,
+          "user_logout_all",
+          now,
+          audit,
+          idempotencyRecordId
+        );
+      } else {
+        await deps.revokeAllUserSessions(bearer.claims.sub, "user_logout_all", now);
+        emitAudit(deps.audit, audit);
+        if (idempotencyRecordId && deps.security) await deps.security.completeIdempotency(idempotencyRecordId, now);
+      }
       return finalize(requestId, success({ acknowledged: true }, requestId));
     } catch {
+      if (idempotencyRecordId && deps.security && nowForFailure != null) {
+        await deps.security.failIdempotency(idempotencyRecordId, nowForFailure).catch(() => undefined);
+      }
       return finalize(requestId, internalFailure(requestId));
     }
   };

@@ -278,7 +278,7 @@ test("consumed token family binding rejects mismatch and runtime fails closed", 
       `INSERT INTO "ConsumedRefreshToken"("id","deviceSessionId","tokenFamilyId","refreshTokenHash","consumedAt","expiresAt") VALUES ($1,$2,$3,$4,$5,$6)`,
       rid("con"), a.id, b.fam, hex(), new Date((BASE + 20) * 1000), new Date((BASE + 1000) * 1000)
     ),
-    /foreign key/i
+    /23503|foreign key|外键/i
   );
 
   const validHash = hex();

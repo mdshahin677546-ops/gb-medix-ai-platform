@@ -17,6 +17,9 @@ export const MOBILE_AUTH_AUDIT_EVENTS = [
   "mobile_refresh_replay_detected",
   "mobile_session_revoked",
   "mobile_all_sessions_revoked",
+  "mobile_auth_rate_limited",
+  "mobile_auth_idempotency_conflict",
+  "mobile_auth_boundary_rejected",
   "mobile_session_expired",
   "mobile_session_compromised"
 ] as const;
@@ -38,7 +41,19 @@ export const FORBIDDEN_AUDIT_FIELDS = [
   "phone",
   "password",
   "healthData",
-  "paymentInfo"
+  "medicalData",
+  "paymentInfo",
+  "providerPayload",
+  "rawError",
+  "stack",
+  "sql",
+  "message",
+  "details",
+  "context",
+  "metadata",
+  "signingKey",
+  "controlKey",
+  "idempotencyKey"
 ] as const;
 
 /**
@@ -53,6 +68,18 @@ export const MOBILE_AUTH_AUDIT_REASONS = [
   "replay_detected",
   "user_logout",
   "user_logout_all",
+  "rate_limited",
+  "idempotency_conflict",
+  "query_rejected",
+  "content_type_rejected",
+  "header_rejected",
+  "idempotency_key_rejected",
+  "body_too_large",
+  "body_decode_failed",
+  "malformed_json",
+  "body_schema_rejected",
+  "validation_failed",
+  "internal_error",
   "session_version_mismatch",
   "token_family_revoked",
   "expired",
@@ -61,6 +88,15 @@ export const MOBILE_AUTH_AUDIT_REASONS = [
 ] as const;
 export type MobileAuthAuditReason = (typeof MOBILE_AUTH_AUDIT_REASONS)[number];
 
+export const MOBILE_AUTH_AUDIT_OUTCOMES = [
+  "success",
+  "denied",
+  "conflict",
+  "rate_limited",
+  "internal_error"
+] as const;
+export type MobileAuthAuditOutcome = (typeof MOBILE_AUTH_AUDIT_OUTCOMES)[number];
+
 export const mobileAuthAuditEventSchema = z
   .object({
     event: z.enum(MOBILE_AUTH_AUDIT_EVENTS),
@@ -68,8 +104,11 @@ export const mobileAuthAuditEventSchema = z
     userId: z.string().min(1).max(128).optional(),
     deviceSessionId: z.string().min(1).max(128).optional(),
     tokenFamilyId: z.string().min(1).max(128).optional(),
+    endpoint: z.enum(["refresh", "logout", "logout-all"]).optional(),
+    requestId: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/).optional(),
     // Controlled enum only — no arbitrary details/message/context escape hatch.
-    reason: z.enum(MOBILE_AUTH_AUDIT_REASONS).optional()
+    reason: z.enum(MOBILE_AUTH_AUDIT_REASONS).optional(),
+    outcome: z.enum(MOBILE_AUTH_AUDIT_OUTCOMES).optional()
   })
   .strict();
 export type MobileAuthAuditEvent = z.infer<typeof mobileAuthAuditEventSchema>;

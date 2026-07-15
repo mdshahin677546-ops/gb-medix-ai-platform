@@ -1,5 +1,6 @@
 import { toNextResponse } from "@/lib/api-v1/http";
-import { runMobileLogoutAll } from "@/lib/api-v1/mobile-session";
+import { prepareMobileAuthRequest } from "@/lib/api-v1/mobile-auth-boundary";
+import { finalizeMobileAuthBoundaryRejection, runMobileLogoutAll } from "@/lib/api-v1/mobile-session";
 
 /**
  * POST /api/v1/mobile/auth/logout-all — revoke ALL device sessions for the acting
@@ -7,7 +8,13 @@ import { runMobileLogoutAll } from "@/lib/api-v1/mobile-session";
  * only; a client-supplied userId is rejected (strict-empty body). Thin adapter.
  */
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => undefined);
-  const authorization = req.headers.get("authorization");
-  return toNextResponse(await runMobileLogoutAll({ body, authorization }));
+  const prepared = await prepareMobileAuthRequest(req, "logout-all");
+  if (!prepared.ok) return toNextResponse(await finalizeMobileAuthBoundaryRejection(prepared.rejection));
+  return toNextResponse(
+    await runMobileLogoutAll({
+      body: prepared.input.body,
+      authorization: prepared.input.authorization,
+      idempotencyKey: prepared.input.idempotencyKey
+    })
+  );
 }
