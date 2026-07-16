@@ -122,7 +122,7 @@ type Tx = {
 };
 export type MobileAuthPrisma = {
   $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
-  $transaction: <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>;
+  $transaction: <T>(fn: (tx: Tx) => Promise<T>, options?: { maxWait?: number; timeout?: number }) => Promise<T>;
   deviceSession: {
     findUnique: (args: { where: Record<string, unknown> }) => Promise<DeviceSessionRow | null>;
     create: (args: { data: Record<string, unknown> }) => Promise<DeviceSessionRow>;
@@ -132,6 +132,15 @@ export type MobileAuthPrisma = {
     findUnique: (args: { where: Record<string, unknown> }) => Promise<{ tokenFamilyId: string; deviceSessionId: string } | null>;
     deleteMany: (args: { where: Record<string, unknown> }) => Promise<{ count: number }>;
   };
+};
+
+const ROTATION_TRANSACTION_OPTIONS = {
+  // The supported contract explicitly exercises 50 concurrent refresh attempts.
+  // NOWAIT row locking below still converts real CAS races to immediate conflict;
+  // this bounded window only prevents Prisma pool acquisition from failing before
+  // workers can reach that fixed conflict path during full-suite DB contention.
+  maxWait: 10_000,
+  timeout: 10_000
 };
 
 export type RefreshTokenClassification =
@@ -146,6 +155,19 @@ export type ReplayRevocationResult =
 /** True for a Prisma unique-constraint violation (safe to normalize to conflict). */
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "P2002");
+}
+
+/** True when PostgreSQL refuses NOWAIT row acquisition; safe to normalize to conflict. */
+function isLockUnavailable(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; meta?: { code?: unknown; message?: unknown }; message?: unknown };
+  return (
+    candidate.code === "55P03" ||
+    candidate.meta?.code === "55P03" ||
+    (typeof candidate.meta?.message === "string" && candidate.meta.message.includes("55P03")) ||
+    (typeof candidate.message === "string" && candidate.message.includes("55P03")) ||
+    (typeof candidate.message === "string" && candidate.message.includes("could not obtain lock"))
+  );
 }
 
 /**
@@ -251,7 +273,7 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
           SELECT "id", "userId", "tokenFamilyId", "status", "rotationCounter",
                  "refreshTokenHash", "createdAt", "lastUsedAt", "idleExpiresAt",
                  "absoluteExpiresAt", "revokedAt", "revokeReason"
-          FROM "DeviceSession" WHERE "id" = ${input.sessionId} FOR UPDATE
+          FROM "DeviceSession" WHERE "id" = ${input.sessionId} FOR UPDATE NOWAIT
         `) as DeviceSessionRow[];
         const row = rows[0];
         if (!row) return { status: "not_found" };
@@ -305,11 +327,11 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
           }
         });
         return { status: "rotated", session: mapRow(updated) };
-      });
+      }, ROTATION_TRANSACTION_OPTIONS);
     } catch (error) {
-      // Unique-constraint race -> conflict; any other DB error -> invalid_input.
+      // Unique-constraint and busy-row races -> conflict; any other DB error -> invalid_input.
       // Never surface Prisma/SQL text upward.
-      return { status: isUniqueViolation(error) ? "conflict" : "invalid_input" };
+      return { status: isUniqueViolation(error) || isLockUnavailable(error) ? "conflict" : "invalid_input" };
     }
   }
 
@@ -329,7 +351,7 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
           SELECT "id", "userId", "tokenFamilyId", "status", "rotationCounter",
                  "refreshTokenHash", "createdAt", "lastUsedAt", "idleExpiresAt",
                  "absoluteExpiresAt", "revokedAt", "revokeReason"
-          FROM "DeviceSession" WHERE "id" = ${input.sessionId} FOR UPDATE
+          FROM "DeviceSession" WHERE "id" = ${input.sessionId} FOR UPDATE NOWAIT
         `) as DeviceSessionRow[];
         const row = rows[0];
         if (!row) return { status: "not_found" };
@@ -376,9 +398,9 @@ export class PrismaDeviceSessionStore implements DeviceSessionStore {
         await insertMobileAuthAudit(tx, audit);
         if (idempotencyRecordId) await completeMobileAuthIdempotency(tx, idempotencyRecordId, input.now);
         return { status: "rotated", session: mapRow(updated) };
-      });
+      }, ROTATION_TRANSACTION_OPTIONS);
     } catch (error) {
-      return { status: isUniqueViolation(error) ? "conflict" : "invalid_input" };
+      return { status: isUniqueViolation(error) || isLockUnavailable(error) ? "conflict" : "invalid_input" };
     }
   }
 
