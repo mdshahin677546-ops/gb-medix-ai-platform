@@ -4,7 +4,8 @@
 // BETA-0A migration) rejects every UPDATE and DELETE, so this module intentionally
 // exposes NO update/delete helper. Metadata is server-built and defensively
 // sanitized: no secrets, tokens, cookies, Authorization, connection strings, full
-// IPs, emails, health free-text, patient, or payment data may ever be stored.
+// IPs, emails, health free-text, patient, payment data, or model-generated free
+// text may ever be stored.
 
 // Fixed, enumerated admin actions — never free text from a client.
 export const ADMIN_AUDIT_ACTIONS = {
@@ -13,72 +14,108 @@ export const ADMIN_AUDIT_ACTIONS = {
 export type AdminAuditAction =
   (typeof ADMIN_AUDIT_ACTIONS)[keyof typeof ADMIN_AUDIT_ACTIONS];
 
-// Key fragments that must never appear in audit metadata (defense in depth even
-// though the server, not the client, constructs metadata). Keys are canonicalized
-// before matching so variants such as access_token, access-token, or
-// authorization\r cannot hide sensitive fields behind separators/casing.
-const FORBIDDEN_METADATA_KEY_FRAGMENTS = [
-  "password",
-  "token",
-  "accesstoken",
-  "refreshtoken",
-  "cookie",
-  "authorization",
-  "secret",
-  "apikey",
-  "api_key",
-  "connectionstring",
-  "databaseurl",
-  "database_url",
-  "ip",
-  "ipaddress",
-  "email",
-  "health",
-  "healthdata",
-  "medical",
-  "diagnosis",
-  "symptom",
-  "prompt",
-  "response",
-  "note",
-  "notes",
-  "mrn",
-  "phone",
-  "contact",
-  "patient",
-  "payment",
-  "paymentinfo",
-  "card"
-];
-
-const FORBIDDEN_METADATA_EXACT_KEYS = new Set([
-  "__proto__",
-  "constructor",
-  "prototype"
+// Single-token sensitive words. A key is rejected if ANY of its canonical tokens
+// equals one of these. Because keys are tokenized (camelCase/PascalCase, acronym,
+// and separator boundaries — see canonicalizeMetadataKey), userMessage,
+// user_message, USER-MESSAGE, and "user message" all yield a "message" token.
+// Audit metadata must be strictly minimized, so the free-text/model-content family
+// (message/content/text/prompt/response/note/comment/summary/…) is denied too.
+const SENSITIVE_TOKENS = new Set<string>([
+  // credentials / secrets
+  "password", "passwd", "secret", "secrets", "token", "tokens", "cookie", "cookies",
+  "authorization", "auth", "bearer", "jwt", "credential", "credentials",
+  // contact / identifiers
+  "email", "emails", "phone", "ip", "address", "contact", "mrn",
+  // payment / financial
+  "payment", "payments", "card", "cvv", "cvc", "bank", "stripe", "billing",
+  "invoice", "transaction",
+  // medical / patient
+  "patient", "patients", "diagnosis", "diagnoses", "symptom", "symptoms", "health",
+  "medical", "treatment", "medication", "prescription", "clinical", "consultation",
+  // free-text / model-generated content
+  "message", "messages", "content", "contents", "text", "prompt", "prompts",
+  "response", "responses", "completion", "completions", "generation", "generated",
+  "transcript", "transcription", "report", "reports", "note", "notes", "comment",
+  "comments", "description", "descriptions", "detail", "details", "reason",
+  "reasons", "summary", "summaries", "body", "payload"
 ]);
 
+// Multi-token sensitive concepts, matched against the joined (separator-stripped)
+// canonical key. These catch compound fields whose individual tokens are benign in
+// isolation (model + output, api + key, database + url, connection + string).
+const SENSITIVE_JOINED_CONCEPTS = [
+  "modeloutput", "modelinput", "outputtext", "inputprompt", "generatedtext",
+  "freetext", "freeform", "rawtext",
+  "apikey", "accesstoken", "refreshtoken", "databaseurl", "connectionstring", "connstring",
+  "cardnumber", "phonenumber", "emailaddress", "ipaddress",
+  "patientid", "patientname", "medicalrecord",
+  "requestbody", "responsebody", "requestpayload", "responsepayload",
+  "requestcontent", "responsecontent", "requestmessage", "responsemessage",
+  "usermessage", "eventcontent"
+];
+
+// Exact (case-insensitive) key names always rejected, incl. prototype-pollution
+// vectors that must never be treated as ordinary tokens.
+const FORBIDDEN_METADATA_EXACT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 const MAX_METADATA_BYTES = 2048;
+const MAX_STRING_VALUE_LENGTH = 256;
 
 export class AdminAuditValidationError extends Error {}
 
-function canonicalizeMetadataKey(key: string): string {
-  if (!key || /[\x00-\x1f\x7f]/.test(key)) {
-    throw new AdminAuditValidationError("metadata contains a forbidden key");
+// Fixed, non-revealing rejection — never echoes the offending key or value into
+// the error, a log, or the response.
+function rejectKey(): never {
+  throw new AdminAuditValidationError("metadata contains a forbidden key");
+}
+
+// Canonicalize a metadata key into lowercase tokens plus a joined form. Splits on
+// camelCase/PascalCase boundaries, acronym→word boundaries, and the separators
+// _ - space . : / \. Fails closed on non-strings, control characters (NUL/C0/DEL,
+// incl. CR/LF/Tab), unpaired surrogates, or an empty token set — a key that cannot
+// be safely canonicalized is never trusted.
+function canonicalizeMetadataKey(key: string): { tokens: string[]; joined: string } {
+  if (typeof key !== "string" || key.length === 0) rejectKey();
+  let norm: string;
+  try {
+    norm = key.normalize("NFKC");
+  } catch {
+    rejectKey();
   }
-  const exactKey = key.trim().toLowerCase();
-  if (FORBIDDEN_METADATA_EXACT_KEYS.has(exactKey)) {
-    throw new AdminAuditValidationError("metadata contains a forbidden key");
+  for (let i = 0; i < norm.length; i++) {
+    const c = norm.charCodeAt(i);
+    if (c <= 0x1f || c === 0x7f) rejectKey();
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const n = norm.charCodeAt(i + 1);
+      if (!(n >= 0xdc00 && n <= 0xdfff)) rejectKey();
+      i++;
+    } else if (c >= 0xdc00 && c <= 0xdfff) {
+      rejectKey();
+    }
   }
-  const canonical = exactKey.replace(/[^a-z0-9]/g, "");
-  if (!canonical) {
-    throw new AdminAuditValidationError("metadata contains a forbidden key");
-  }
-  return canonical;
+  const spaced = norm
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
+  const tokens = spaced.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (tokens.length === 0) rejectKey();
+  return { tokens, joined: tokens.join("") };
+}
+
+// Two-layer key check: exact-name denylist, single-token match, then multi-token
+// joined-concept match. Throws (via canonicalizeMetadataKey) on unsanitizable keys.
+function isForbiddenKey(key: string): boolean {
+  if (FORBIDDEN_METADATA_EXACT_KEYS.has(key.trim().toLowerCase())) return true;
+  const { tokens, joined } = canonicalizeMetadataKey(key);
+  if (tokens.some((t) => SENSITIVE_TOKENS.has(t))) return true;
+  if (SENSITIVE_JOINED_CONCEPTS.some((concept) => joined.includes(concept))) return true;
+  return false;
 }
 
 // Returns safe metadata (a shallow, primitive-only object) or throws
-// AdminAuditValidationError. Rejects forbidden keys, nested objects/arrays, and
-// oversized payloads rather than silently storing sensitive or unbounded data.
+// AdminAuditValidationError. Rejects forbidden keys, non-plain / nested / array
+// shapes, non-finite numbers, oversized or multi-line string values, and oversized
+// payloads — atomically: any offending entry rejects the WHOLE object so no partial
+// metadata is ever produced or persisted.
 export function sanitizeAuditMetadata(
   metadata: unknown
 ): Record<string, string | number | boolean> | undefined {
@@ -93,8 +130,7 @@ export function sanitizeAuditMetadata(
   }
   const out: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(metadata as Record<string, unknown>)) {
-    const canonicalKey = canonicalizeMetadataKey(key);
-    if (FORBIDDEN_METADATA_KEY_FRAGMENTS.some((part) => canonicalKey.includes(part))) {
+    if (isForbiddenKey(key)) {
       throw new AdminAuditValidationError("metadata contains a forbidden key");
     }
     if (value === null) continue;
@@ -104,6 +140,20 @@ export function sanitizeAuditMetadata(
     }
     if (t === "number" && !Number.isFinite(value)) {
       throw new AdminAuditValidationError("metadata values must be finite");
+    }
+    if (t === "string") {
+      const s = value as string;
+      if (s.length > MAX_STRING_VALUE_LENGTH) {
+        throw new AdminAuditValidationError("metadata value too long");
+      }
+      // Audit values are short and single-line: reject all control chars (incl.
+      // CR/LF/Tab) so multi-line free-text bodies cannot ride in on a value.
+      for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        if (c <= 0x1f || c === 0x7f) {
+          throw new AdminAuditValidationError("metadata value contains control characters");
+        }
+      }
     }
     out[key] = value as string | number | boolean;
   }
