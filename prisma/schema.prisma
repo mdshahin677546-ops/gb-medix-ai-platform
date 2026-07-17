@@ -11,6 +11,7 @@ model User {
   id                     String                      @id @default(cuid())
   email                  String                      @unique
   status                 String                      @default("pending")
+  role                   Role                        @default(USER)
   sessionVersion         Int                         @default(1)
   emailVerifiedAt        DateTime?
   createdAt              DateTime                    @default(now())
@@ -29,9 +30,19 @@ model User {
   aiProcessingConsents   AIProcessingConsent[]
   deviceSessions         DeviceSession[]
   mobileAuthRateLimits   MobileAuthRateLimitBucket[]
+  adminAuditLogs         AdminAuditLog[]
 
   @@index([status])
+  @@index([role])
   @@index([createdAt])
+}
+
+// BETA-0A — Minimal role model for server-side RBAC. Role is authoritative in the
+// database only; it is never inferred from email, headers, cookies, or any client
+// input. Default USER keeps every existing/new user least-privileged.
+enum Role {
+  USER
+  ADMIN
 }
 
 // Batch 2.2B — Mobile device sessions (persistent, transactional refresh rotation).
@@ -455,4 +466,28 @@ model EmailVerification {
   @@index([email])
   @@index([expiresAt])
   @@index([verifiedAt])
+}
+
+// BETA-0A — Append-only administrative audit trail. Rows are INSERTed by trusted
+// server code only; a database trigger (see migration) rejects every UPDATE and
+// DELETE so audit evidence is immutable. No secrets, tokens, cookies, full IPs,
+// health free-text, patient, or payment data may ever be stored here. The actor
+// is a real DB user; onDelete: Restrict prevents silently erasing audit evidence
+// when a user row is deleted (user deletion is out of scope for BETA-0A and is
+// handled by a later batch that must explicitly reconcile audit retention).
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String
+  action      String
+  targetType  String?
+  targetId    String?
+  requestId   String
+  outcome     String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  actor       User     @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([actorUserId])
+  @@index([action])
+  @@index([createdAt])
 }
