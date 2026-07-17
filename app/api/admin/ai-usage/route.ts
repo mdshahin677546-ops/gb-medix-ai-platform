@@ -1,74 +1,36 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/lib/admin/rbac";
+import {
+  readAdminAiUsageWithAudit,
+  type AdminAiUsagePrisma
+} from "@/lib/admin/ai-usage-read";
+import { newRequestId } from "@/lib/api-v1/request-context";
 
 export const dynamic = "force-dynamic";
 
-function adminEmails() {
-  return (process.env.ADMIN_EMAILS || "")
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 export async function GET() {
-  const user = await getCurrentUser();
-  const admins = adminEmails();
-  if (!user || admins.length === 0 || !admins.includes(user.email.toLowerCase())) {
-    return NextResponse.json({ error: "Admin access required." }, { status: 403 });
+  // BETA-0A: authoritative database-role RBAC. ADMIN_EMAILS is no longer consulted
+  // at runtime — only User.role === ADMIN (read from the DB by the existing
+  // authoritative session resolver) may access this endpoint. There is no
+  // email-allowlist fallback.
+  const guard = await requireAdmin(() => getCurrentUser());
+  if (!guard.ok) {
+    return NextResponse.json(guard.body, { status: guard.status });
   }
 
-  const dayStart = new Date();
-  dayStart.setUTCHours(0, 0, 0, 0);
-  const where = { createdAt: { gte: dayStart } };
-
-  const [daily, byUser, byEndpoint, byProvider] = await Promise.all([
-    prisma.aIUsage.aggregate({ where, _sum: { tokens: true, cost: true }, _count: true }),
-    prisma.aIUsage.groupBy({
-      by: ["userId"],
-      where,
-      _sum: { tokens: true, cost: true },
-      _count: true
-    }),
-    prisma.aIUsage.groupBy({
-      by: ["endpoint"],
-      where,
-      _sum: { tokens: true, cost: true },
-      _count: true
-    }),
-    prisma.aIUsage.groupBy({
-      by: ["provider", "model"],
-      where,
-      _sum: { tokens: true, cost: true },
-      _count: true
-    })
-  ]);
-
-  return NextResponse.json({
-    day: dayStart.toISOString(),
-    daily: {
-      calls: daily._count,
-      tokens: daily._sum.tokens || 0,
-      cost: daily._sum.cost || 0
-    },
-    byUser: byUser.map((row) => ({
-      userId: row.userId,
-      calls: row._count,
-      tokens: row._sum.tokens || 0,
-      cost: row._sum.cost || 0
-    })),
-    byEndpoint: byEndpoint.map((row) => ({
-      endpoint: row.endpoint,
-      calls: row._count,
-      tokens: row._sum.tokens || 0,
-      cost: row._sum.cost || 0
-    })),
-    byProvider: byProvider.map((row) => ({
-      provider: row.provider,
-      model: row.model,
-      calls: row._count,
-      tokens: row._sum.tokens || 0,
-      cost: row._sum.cost || 0
-    }))
-  });
+  const requestId = newRequestId();
+  try {
+    const data = await readAdminAiUsageWithAudit({
+      prisma: prisma as unknown as AdminAiUsagePrisma,
+      actorUserId: guard.user.id,
+      requestId
+    });
+    return NextResponse.json(data, { headers: { "X-Request-Id": requestId } });
+  } catch {
+    // Fail-closed: if the read+audit boundary fails (including an audit-write
+    // failure), never return admin data, and never leak internal detail.
+    return NextResponse.json({ error: "Internal error." }, { status: 500 });
+  }
 }
