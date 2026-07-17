@@ -157,3 +157,89 @@ test("insertAdminAudit writes fixed action + sanitized fields via injected write
   }), audit.AdminAuditValidationError);
   assert.equal(called, false);
 });
+
+test("rejects model-output and free-text metadata key variants", () => {
+  const keys = [
+    "model_output", "model-output", "model output", "modelOutput", "ModelOutput",
+    "modelInput", "model_input", "outputText", "inputPrompt", "generatedText",
+    "completion", "completions", "generation",
+    "freeText", "free_text", "free-text", "free form", "freeForm", "rawText", "text"
+  ];
+  for (const k of keys) {
+    assert.throws(() => audit.sanitizeAuditMetadata({ [k]: "x" }), audit.AdminAuditValidationError, k);
+  }
+});
+
+test("rejects message, content, comment, and summary metadata keys", () => {
+  const keys = [
+    "message", "messages", "user_message", "userMessage",
+    "content", "contents", "event_content",
+    "comment", "comments", "summary", "summaries",
+    "description", "descriptions", "detail", "details", "reason", "reasons",
+    "transcript", "transcription", "report", "reports",
+    "request_body", "response_body", "requestBody", "responseBody", "body", "payload",
+    "prompt", "response"
+  ];
+  for (const k of keys) {
+    assert.throws(() => audit.sanitizeAuditMetadata({ [k]: "x" }), audit.AdminAuditValidationError, k);
+  }
+});
+
+test("accepts bounded safe operational metadata", () => {
+  const safe = {
+    route: "admin-ai-usage", method: "GET", source: "admin-route", event: "read",
+    outcomeCode: "SUCCESS", resultCount: 4, cached: false, version: null
+  };
+  // Values are preserved unchanged; a null value is dropped (not stored).
+  assert.deepEqual(audit.sanitizeAuditMetadata(safe), {
+    route: "admin-ai-usage", method: "GET", source: "admin-route", event: "read",
+    outcomeCode: "SUCCESS", resultCount: 4, cached: false
+  });
+  for (const k of ["route", "method", "source", "event", "outcomeCode", "resultCount", "cached", "version"]) {
+    const v = k === "resultCount" ? 1 : k === "cached" ? true : "v";
+    assert.doesNotThrow(() => audit.sanitizeAuditMetadata({ [k]: v }), k);
+  }
+  // A safe key must not become a free-text carrier: overlong / multi-line values reject.
+  assert.throws(() => audit.sanitizeAuditMetadata({ event: "x".repeat(300) }), audit.AdminAuditValidationError);
+  assert.throws(() => audit.sanitizeAuditMetadata({ event: "line1\nline2" }), audit.AdminAuditValidationError);
+});
+
+test("fails atomically when safe and sensitive metadata are mixed", async () => {
+  for (const m of [
+    { route: "admin-ai-usage", model_output: "sensitive generated text" },
+    { method: "GET", message: "patient details" },
+    { source: "admin-route", summary: "sensitive summary" }
+  ]) {
+    assert.throws(() => audit.sanitizeAuditMetadata(m), audit.AdminAuditValidationError);
+  }
+  // No partial write: insertAdminAudit rejects before ever calling create.
+  let called = false;
+  const writer = { adminAuditLog: { create: async () => { called = true; return { id: "x" }; } } };
+  await assert.rejects(() => audit.insertAdminAudit(writer, {
+    actorUserId: "a1", action: audit.ADMIN_AUDIT_ACTIONS.AI_USAGE_READ,
+    requestId: "r", outcome: "success", metadata: { route: "admin-ai-usage", model_output: "leak" }
+  }), audit.AdminAuditValidationError);
+  assert.equal(called, false);
+});
+
+test("preserves prior sanitizer safety: credentials, medical, payment, prototype, values", () => {
+  for (const k of [
+    "authorization\r", "constructor", "prototype", "__proto__",
+    "access_token", "refresh-token", "apiKey", "database_url", "connection_string",
+    "patient_id", "diagnosis", "medical.record", "payment", "card_number",
+    "phoneNumber", "email_address", "ip_address"
+  ]) {
+    assert.throws(() => audit.sanitizeAuditMetadata({ [k]: "x" }), audit.AdminAuditValidationError, k);
+  }
+  // JSON-parsed __proto__ own-property is rejected and does not pollute Object.prototype.
+  assert.throws(() => audit.sanitizeAuditMetadata(JSON.parse('{"__proto__":{"polluted":true}}')), audit.AdminAuditValidationError);
+  assert.equal(({}).polluted, undefined);
+  assert.equal(Object.prototype.polluted, undefined);
+  // non-JSON-safe values
+  for (const v of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    assert.throws(() => audit.sanitizeAuditMetadata({ n: v }), audit.AdminAuditValidationError);
+  }
+  // bounded, single-line string values
+  assert.throws(() => audit.sanitizeAuditMetadata({ label: "x".repeat(257) }), audit.AdminAuditValidationError);
+  assert.throws(() => audit.sanitizeAuditMetadata({ label: "a\tb" }), audit.AdminAuditValidationError);
+});
