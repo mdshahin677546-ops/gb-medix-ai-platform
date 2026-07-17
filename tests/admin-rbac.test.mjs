@@ -100,12 +100,36 @@ test("sanitizeAuditMetadata accepts safe primitives, rejects sensitive/nested/ov
   assert.deepEqual(audit.sanitizeAuditMetadata({ note: "ok", n: 3, flag: true }), { note: "ok", n: 3, flag: true });
   assert.equal(audit.sanitizeAuditMetadata(undefined), undefined);
   assert.equal(audit.sanitizeAuditMetadata(null), undefined);
-  for (const bad of ["password", "token", "cookie", "authorization", "email", "ip", "payment", "health"]) {
+  for (const bad of [
+    "password",
+    "token",
+    "cookie",
+    "authorization",
+    "email",
+    "ip",
+    "payment",
+    "health",
+    "access_token",
+    "refresh-token",
+    "Authorization\r",
+    "constructor",
+    "prototype",
+    "__proto__",
+    "prompt",
+    "response",
+    "diagnosis",
+    "symptom",
+    "patient_name",
+    "phoneNumber",
+    "medical.record"
+  ]) {
     assert.throws(() => audit.sanitizeAuditMetadata({ [bad]: "x" }), audit.AdminAuditValidationError, bad);
   }
   assert.throws(() => audit.sanitizeAuditMetadata({ nested: { a: 1 } }), audit.AdminAuditValidationError);
   assert.throws(() => audit.sanitizeAuditMetadata([1, 2, 3]), audit.AdminAuditValidationError);
   assert.throws(() => audit.sanitizeAuditMetadata({ big: "x".repeat(5000) }), audit.AdminAuditValidationError);
+  assert.throws(() => audit.sanitizeAuditMetadata({ n: Number.NaN }), audit.AdminAuditValidationError);
+  assert.throws(() => audit.sanitizeAuditMetadata({ n: Number.POSITIVE_INFINITY }), audit.AdminAuditValidationError);
 });
 
 test("insertAdminAudit writes fixed action + sanitized fields via injected writer", async () => {

@@ -13,9 +13,11 @@ export const ADMIN_AUDIT_ACTIONS = {
 export type AdminAuditAction =
   (typeof ADMIN_AUDIT_ACTIONS)[keyof typeof ADMIN_AUDIT_ACTIONS];
 
-// Keys that must never appear in audit metadata (defense in depth even though the
-// server, not the client, constructs metadata).
-const FORBIDDEN_METADATA_KEYS = new Set([
+// Key fragments that must never appear in audit metadata (defense in depth even
+// though the server, not the client, constructs metadata). Keys are canonicalized
+// before matching so variants such as access_token, access-token, or
+// authorization\r cannot hide sensitive fields behind separators/casing.
+const FORBIDDEN_METADATA_KEY_FRAGMENTS = [
   "password",
   "token",
   "accesstoken",
@@ -34,15 +36,43 @@ const FORBIDDEN_METADATA_KEYS = new Set([
   "health",
   "healthdata",
   "medical",
+  "diagnosis",
+  "symptom",
+  "prompt",
+  "response",
+  "mrn",
+  "phone",
+  "contact",
   "patient",
   "payment",
   "paymentinfo",
   "card"
+];
+
+const FORBIDDEN_METADATA_EXACT_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype"
 ]);
 
 const MAX_METADATA_BYTES = 2048;
 
 export class AdminAuditValidationError extends Error {}
+
+function canonicalizeMetadataKey(key: string): string {
+  if (!key || /[\x00-\x1f\x7f]/.test(key)) {
+    throw new AdminAuditValidationError("metadata contains a forbidden key");
+  }
+  const exactKey = key.trim().toLowerCase();
+  if (FORBIDDEN_METADATA_EXACT_KEYS.has(exactKey)) {
+    throw new AdminAuditValidationError("metadata contains a forbidden key");
+  }
+  const canonical = exactKey.replace(/[^a-z0-9]/g, "");
+  if (!canonical) {
+    throw new AdminAuditValidationError("metadata contains a forbidden key");
+  }
+  return canonical;
+}
 
 // Returns safe metadata (a shallow, primitive-only object) or throws
 // AdminAuditValidationError. Rejects forbidden keys, nested objects/arrays, and
@@ -51,18 +81,27 @@ export function sanitizeAuditMetadata(
   metadata: unknown
 ): Record<string, string | number | boolean> | undefined {
   if (metadata === undefined || metadata === null) return undefined;
-  if (typeof metadata !== "object" || Array.isArray(metadata)) {
+  if (
+    typeof metadata !== "object" ||
+    Array.isArray(metadata) ||
+    (Object.getPrototypeOf(metadata) !== Object.prototype &&
+      Object.getPrototypeOf(metadata) !== null)
+  ) {
     throw new AdminAuditValidationError("metadata must be a plain object");
   }
   const out: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(metadata as Record<string, unknown>)) {
-    if (FORBIDDEN_METADATA_KEYS.has(key.toLowerCase())) {
+    const canonicalKey = canonicalizeMetadataKey(key);
+    if (FORBIDDEN_METADATA_KEY_FRAGMENTS.some((part) => canonicalKey.includes(part))) {
       throw new AdminAuditValidationError("metadata contains a forbidden key");
     }
     if (value === null) continue;
     const t = typeof value;
     if (t !== "string" && t !== "number" && t !== "boolean") {
       throw new AdminAuditValidationError("metadata values must be primitive");
+    }
+    if (t === "number" && !Number.isFinite(value)) {
+      throw new AdminAuditValidationError("metadata values must be finite");
     }
     out[key] = value as string | number | boolean;
   }
