@@ -97,7 +97,7 @@ test("requireRole supports multiple allowed roles (future-proof)", async () => {
 });
 
 test("sanitizeAuditMetadata accepts safe primitives, rejects sensitive/nested/oversized", () => {
-  assert.deepEqual(audit.sanitizeAuditMetadata({ note: "ok", n: 3, flag: true }), { note: "ok", n: 3, flag: true });
+  assert.deepEqual(audit.sanitizeAuditMetadata({ event: "ok", n: 3, flag: true }), { event: "ok", n: 3, flag: true });
   assert.equal(audit.sanitizeAuditMetadata(undefined), undefined);
   assert.equal(audit.sanitizeAuditMetadata(null), undefined);
   for (const bad of [
@@ -115,6 +115,8 @@ test("sanitizeAuditMetadata accepts safe primitives, rejects sensitive/nested/ov
     "constructor",
     "prototype",
     "__proto__",
+    "note",
+    "notes",
     "prompt",
     "response",
     "diagnosis",

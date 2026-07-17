@@ -40,6 +40,8 @@ const FORBIDDEN_METADATA_KEY_FRAGMENTS = [
   "symptom",
   "prompt",
   "response",
+  "note",
+  "notes",
   "mrn",
   "phone",
   "contact",
